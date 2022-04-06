@@ -1,93 +1,175 @@
-/* ========================================
- *
- * Copyright Samuel Walsh, 2014
- * All Rights Reserved
- * UNPUBLISHED, LICENSED SOFTWARE.
- *
- * CONFIDENTIAL AND PROPRIETARY INFORMATION
- * WHICH IS THE PROPERTY OF Samuel Walsh.
- *
- * ========================================
-*/
-
 #include <stdint.h>
+#include "cy_pdl.h"
+#include "cyhal.h"
+#include "cybsp.h"
+#include "cy_retarget_io.h"
+#include "resource_map.h"
 
-#define I2C_MPU6050_I2C_WRITE_XFER_MODE 0x00
-#define I2C_MPU6050_I2C_READ_XFER_MODE 0x00
-#define I2C_MPU6050_I2C_ACK_DATA 0x01u
-#define I2C_MPU6050_I2C_NAK_DATA 0x00u
+/***************************************
+ *            Constants
+ ****************************************/
+#define CMD_TO_CMD_DELAY (1000UL)
+#define PACKET_SOP_POS (0UL)
 
-void I2CReadBytes(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint8_t *value) {
-	uint8_t i=0;
-	I2C_MPU6050_I2CMasterSendStart(devAddr, I2C_MPU6050_I2C_WRITE_XFER_MODE);
-	I2C_MPU6050_I2CMasterWriteByte(regAddr);
-	I2C_MPU6050_I2CMasterSendRestart(devAddr, I2C_MPU6050_I2C_READ_XFER_MODE);
-	while (i++ < (length-1)) {
-		*value++ = I2C_MPU6050_I2CMasterReadByte(I2C_MPU6050_I2C_ACK_DATA);
+/* I2C slave address to communicate with */
+#define I2C_SLAVE_ADDR (0x68)
+
+/* I2C bus frequency */
+#define I2C_FREQ (400000UL)
+
+/***************************************
+ *          Global Variables
+ ****************************************/
+cyhal_i2c_t mI2C;
+
+/*******************************************************************************
+ * Function Name: handle_error
+ ********************************************************************************
+ * Summary:
+ * User defined error handling function
+ *
+ * Parameters:
+ *  void
+ *
+ * Return:
+ *  void
+ *
+ *******************************************************************************/
+void handle_error(void)
+{
+	/* Disable all interrupts. */
+	__disable_irq();
+	CY_ASSERT(0);
+	printf("An Error Occurred With an I2C Function\r\n\n");
+}
+
+void I2C_MPU6050_init()
+{
+	cy_rslt_t result;
+
+	/* PSOC Will be I2C Master */
+	cyhal_i2c_cfg_t mI2C_cfg;
+
+	printf(">> Configuring I2C..... ");
+	mI2C_cfg.is_slave = false;
+	mI2C_cfg.address = 0;
+	mI2C_cfg.frequencyhal_hz = I2C_FREQ;
+
+	/* Initialize */
+	if (cyhal_i2c_init(&mI2C, mI2C_SDA, mI2C_SCL, NULL) != CY_RSLT_SUCCESS)
+	{
+		handle_error();
 	}
-	*value = I2C_MPU6050_I2CMasterReadByte(I2C_MPU6050_I2C_NAK_DATA);
-	I2C_MPU6050_I2CMasterSendStop();	
+
+	/* Configure */
+	if (cyhal_i2c_configure(&mI2C, &mI2C_cfg) != CY_RSLT_SUCCESS)
+	{
+		handle_error();
+	}
+	printf("Done with I2C Init\r\n");
 }
 
-void I2CReadByte(uint8_t devAddr, uint8_t regAddr, uint8_t *value) {
-	I2CReadBytes(devAddr, regAddr, 1, value);
+/***************************************
+ *          I2C Read Functions
+ ****************************************/
+
+void I2CReadBytes(uint8_t regAddr, uint8_t length, uint8_t *value)
+{	
+	/* Need to write a register to MPU6050 first 
+		so that it knows what info to send back */
+	uint8_t write_buffer_length = 1;
+	uint8_t i2c_write_buffer[write_buffer_length];
+	i2c_write_buffer[PACKET_SOP_POS] =  regAddr;
+	
+	/* Setup response packet settings */
+	uint8_t read_buffer_length = length;
+	uint8_t i2c_read_buffer[read_buffer_length];
+
+	/* Write the our specified register to MPU6050. 
+	Need to make sure send_stop flag is set to 
+	false since we're reading right after */
+	if (CY_RSLT_SUCCESS == cyhal_i2c_master_write(&mI2C, I2C_SLAVE_ADDR, i2c_write_buffer, write_buffer_length, 0, false))
+	{
+		/* Read response packet from the slave. */
+		if (CY_RSLT_SUCCESS == cyhal_i2c_master_read(&mI2C, I2C_SLAVE_ADDR, i2c_read_buffer, read_buffer_length, 0, true))
+		{
+				/* Send data back to calling function */
+				uint8_t i = 0;
+				while (i < length)
+				{
+					*value++ = i2c_read_buffer[i];
+					i++;
+				}
+		}
+		else
+		{
+			printf("Failed at I2CWriteBytes()\r\n\n");
+		}
+	}
 }
 
-void I2CReadBits(uint8_t devAddr, uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t *value) {
-   	uint8_t mask = ((1 << length) - 1) << (bitStart - length + 1);
-    I2CReadByte(devAddr, regAddr, value);
-    *value &= mask;
-    *value >>= (bitStart - length + 1);
+void I2CReadByte(uint8_t regAddr, uint8_t *value)
+{
+	I2CReadBytes(regAddr, 1, value);
 }
 
-void I2CReadBit(uint8_t devAddr, uint8_t regAddr, uint8_t bitNum, uint8_t *value) {
-	I2CReadByte(devAddr, regAddr, value);
+void I2CReadBits(uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t *value)
+{
+	uint8_t mask = ((1 << length) - 1) << (bitStart - length + 1);
+	I2CReadByte(regAddr, value);
+	*value &= mask;
+	*value >>= (bitStart - length + 1);
+}
+
+void I2CReadBit(uint8_t regAddr, uint8_t bitNum, uint8_t *value)
+{
+	I2CReadByte(regAddr, value);
 	*value = *value & (1 << bitNum);
 }
-	
-void I2CWriteBytes(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint8_t *value) {
-	uint8_t i=0;
-	I2C_MPU6050_I2CMasterSendStart(devAddr, I2C_MPU6050_I2C_WRITE_XFER_MODE);
-	I2C_MPU6050_I2CMasterWriteByte(regAddr);
-	while (i++ < length) {
-		I2C_MPU6050_I2CMasterWriteByte(*value++);
+
+/***************************************
+ *          I2C Write Functions
+ ****************************************/
+
+void I2CWriteBytes(uint8_t regAddr, uint8_t length, uint8_t *value)
+{
+	uint8_t write_buffer_length = length + 1;
+	uint8_t i2c_write_buffer[write_buffer_length];
+	i2c_write_buffer[PACKET_SOP_POS] = regAddr;
+
+	uint8_t i = 0;
+	while (i < length)
+	{
+		i2c_write_buffer[1 + i] = *value++;
+		i++;
 	}
-	I2C_MPU6050_I2CMasterSendStop();	
+	if (cyhal_i2c_master_write(&mI2C, I2C_SLAVE_ADDR, i2c_write_buffer, write_buffer_length, 0, true) != CY_RSLT_SUCCESS)
+	{
+		printf("Failed at I2CWriteBytes()\r\n\n");
+	}
 }
 
-void I2CWriteByte(uint8_t devAddr, uint8_t regAddr, uint8_t value) {
-	I2CWriteBytes(devAddr, regAddr, 1, &value);
+void I2CWriteByte(uint8_t regAddr, uint8_t value)
+{
+	I2CWriteBytes(regAddr, 1, &value);
 }
 
-void I2CWriteBits(uint8_t devAddr, uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t value) {
+void I2CWriteBits(uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t value)
+{
 	uint8_t b;
 	uint8_t mask = ((1 << length) - 1) << (bitStart - length + 1);
-	I2CReadByte(devAddr, regAddr, &b);
+	I2CReadByte(regAddr, &b);
 	value <<= (bitStart - length + 1);
 	value &= mask;
 	b &= ~(mask);
 	b |= value;
-	I2CWriteByte(devAddr, regAddr, b);	
+	I2CWriteByte(regAddr, b);
 }
 
-void I2CWriteBit(uint8_t devAddr, uint8_t regAddr, uint8_t bitNum, uint8_t value) {
+void I2CWriteBit(uint8_t regAddr, uint8_t bitNum, uint8_t value)
+{
 	uint8_t b;
-	I2CReadByte(devAddr, regAddr, &b);
+	I2CReadByte(regAddr, &b);
 	b = (value != 0) ? (b | (1 << bitNum)) : (b & ~(1 << bitNum));
-	I2CWriteByte(devAddr, regAddr, b);
-}
-
-void I2CWriteWords(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint16_t *value) {
-	uint8_t i=0;
-	I2C_MPU6050_I2CMasterSendStart(devAddr, I2C_MPU6050_I2C_WRITE_XFER_MODE);
-	I2C_MPU6050_I2CMasterWriteByte(regAddr);
-	while (i++ < length) {
-		I2C_MPU6050_I2CMasterWriteByte(((uint8_t)*value) >> 8);
-		I2C_MPU6050_I2CMasterWriteByte((uint8_t)*value++);
-	}
-	I2C_MPU6050_I2CMasterSendStop();		
-}
-
-void I2CWriteWord(uint8_t devAddr, uint8_t regAddr, uint16_t value) {
-	I2CWriteWords(devAddr, regAddr, 1, &value);
+	I2CWriteByte(regAddr, b);
 }

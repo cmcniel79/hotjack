@@ -1,76 +1,63 @@
 ﻿/*******************************************************************************
-* File Name:   main.c
-*
-* Description: This is the source code for the PWM Square Wave code example
-*              for ModusToolbox.
-*
-* Related Document: See README.md
-*
-*******************************************************************************
-* (c) 2019-2020, Cypress Semiconductor Corporation. All rights reserved.
-*******************************************************************************
-* This software, including source code, documentation and related materials
-* ("Software"), is owned by Cypress Semiconductor Corporation or one of its
-* subsidiaries ("Cypress") and is protected by and subject to worldwide patent
-* protection (United States and foreign), United States copyright laws and
-* international treaty provisions. Therefore, you may use this Software only
-* as provided in the license agreement accompanying the software package from
-* which you obtained this Software ("EULA").
-*
-* If no EULA applies, Cypress hereby grants you a personal, non-exclusive,
-* non-transferable license to copy, modify, and compile the Software source
-* code solely for use in connection with Cypress's integrated circuit products.
-* Any reproduction, modification, translation, compilation, or representation
-* of this Software except as specified above is prohibited without the express
-* written permission of Cypress.
-*
-* Disclaimer: THIS SOFTWARE IS PROVIDED AS-IS, WITH NO WARRANTY OF ANY KIND,
-* EXPRESS OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, NONINFRINGEMENT, IMPLIED
-* WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. Cypress
-* reserves the right to make changes to the Software without notice. Cypress
-* does not assume any liability arising out of the application or use of the
-* Software or any product or circuit described in the Software. Cypress does
-* not authorize its products for use in any products where a malfunction or
-* failure of the Cypress product may reasonably be expected to result in
-* significant property damage, injury or death ("High Risk Product"). By
-* including Cypress's product in a High Risk Product, the manufacturer of such
-* system or application assumes all risk of such use and in doing so agrees to
-* indemnify Cypress against all liability.
-*******************************************************************************/
-
+ * File Name:   main.c
+ *
+ * Description: This is the source code for the PWM Square Wave code example
+ *              for ModusToolbox.
+ *
+ * Related Document: See README.md
+ *
+ *******************************************************************************/
 
 #include "cybsp.h"
 #include "cyhal.h"
 #include "cy_retarget_io.h"
 
+/*******************************************************************************
+ * Macros
+ *******************************************************************************/
+#define NUM_OF_TESTS 100
+#define GYRO_INTERRUPT_PRIORITY (9u)
+
+/* Gyroscope timer values */
+#define GYRO_TIMER_CLOCK_HZ          (10000)
+#define GYRO_TIMER_PERIOD_SECONDS (0.1f)
+#define GYRO_TIMER_PERIOD_HZ (GYRO_TIMER_PERIOD_SECONDS * GYRO_TIMER_CLOCK_HZ)
+#define GYRO_TIMER_PERIOD_INVERSE (1 / GYRO_TIMER_PERIOD_SECONDS)
 
 /*******************************************************************************
-* Macros
-*******************************************************************************/
-/* PWM Frequency = 2Hz */
-#define PWM_FREQUENCY (2u)
-/* PWM Duty-cycle = 50% */
-#define PWM_DUTY_CYCLE (50.0f)
-
+ * Function Prototypes
+ ********************************************************************************/
+void gyro_timer_init(void);
+static void gyro_isr_timer(void *callback_arg, cyhal_timer_event_t event);
 
 /*******************************************************************************
-* Function Name: main
-********************************************************************************
-* Summary:
-* This is the main function for the CPU. It configures the PWM and puts the CPU
-* in Sleep mode to save power.
-*
-* Parameters:
-*  void
-*
-* Return:
-*  int
-*
-*******************************************************************************/
+ * Global Variables
+ *******************************************************************************/
+int16_t GX_meas, GY_meas, GZ_meas; // raw gyroscope values (sensor outputs integers!)
+float GX_off, GY_off, GZ_off;      // gyroscope offset values
+float GX, GY, GZ;                  // gyroscope floats
+float pitch, roll, yaw;            // current pitch, roll and yaw angles
+
+/* Timer flag and object used for setting when rotation is measured */
+bool gyro_timer_interrupt_flag = false;
+cyhal_timer_t gyro_timer;
+
+/*******************************************************************************
+ * Function Name: main
+ ********************************************************************************
+ * Summary:
+ * This is the main function for the CPU. It configures the PWM and puts the CPU
+ * in Sleep mode to save power.
+ *
+ * Parameters:
+ *  void
+ *
+ * Return:
+ *  int
+ *
+ *******************************************************************************/
 int main(void)
 {
-    /* PWM object */
-    cyhal_pwm_t pwm_led_control;
     /* API return code */
     cy_rslt_t result;
 
@@ -95,42 +82,133 @@ int main(void)
 
     /* \x1b[2J\x1b[;H - ANSI ESC sequence for clear screen */
     printf("\x1b[2J\x1b[;H");
-    printf("****************** PSoC 6 MCU: PWM Square Wave ******************\r\n\n");
+    printf("****************** HotJACK MPU6050 Testing ******************\r\n\n");
 
-    /* In this example, PWM output is routed to the user LED on the kit.
-       See HAL API Reference document for API details. */
+    /* Initizalize PSOC I2C Communication w/ MPU6050 */
+    I2C_MPU6050_init();
+    /* Initizalize MPU6050 */
+    MPU6050_full_init();
 
-    /* Initialize the PWM */
-    result = cyhal_pwm_init(&pwm_led_control, CYBSP_USER_LED, NULL);
-    if(CY_RSLT_SUCCESS != result)
+    int i = 0; // for loop increment variable
+    for (i = 0; i < NUM_OF_TESTS; i++)
     {
-        printf("API cyhal_pwm_init failed with error code: %lu\r\n", (unsigned long) result);
-        CY_ASSERT(false);
-    }
-    /* Set the PWM output frequency and duty cycle */
-    result = cyhal_pwm_set_duty_cycle(&pwm_led_control, PWM_DUTY_CYCLE, PWM_FREQUENCY);
-    if(CY_RSLT_SUCCESS != result)
-    {
-        printf("API cyhal_pwm_set_duty_cycle failed with error code: %lu\r\n", (unsigned long) result);
-        CY_ASSERT(false);
-    }
-    /* Start the PWM */
-    result = cyhal_pwm_start(&pwm_led_control);
-    if(CY_RSLT_SUCCESS != result)
-    {
-        printf("API cyhal_pwm_start failed with error code: %lu\r\n", (unsigned long) result);
-        CY_ASSERT(false);
-    }
+        printf("Test Number: %d \n\r", i);
 
-    printf("PWM started successfully. Entering the sleep mode...\r\n");
+        MPU6050_getRotation(&GX_meas, &GY_meas, &GZ_meas);
+        GX_off += GX_meas;
+        GY_off += GY_meas;
+        GZ_off += GZ_meas;
+
+        printf(" GX:%d, GY:%d, GZ:%d,\t", GX, GY, GZ);
+        cyhal_system_delay_ms(25);
+    }
+    GX_off = GX_off / NUM_OF_TESTS;
+    GY_off = GY_off / NUM_OF_TESTS;
+    GZ_off = GZ_off / NUM_OF_TESTS;
+
+    printf("\n\nTest finished, offset values are shown below: \n\n\r");
+    printf("GXoff:%d, GYoff:%d, GZoff:%d\t", (int)GX_off, (int)GY_off, (int)GZ_off);
+
+    /* Initialize gyro timer */
+    gyro_timer_init();
 
     /* Loop infinitely */
     for (;;)
     {
-        /* Put the CPU into sleep mode to save power */
-        cyhal_system_sleep();
+        /* Check the interrupt status */
+        if (gyro_timer_interrupt_flag)
+        {
+            MPU6050_getRotation(&GX_meas, &GY_meas, &GZ_meas);
+            /* 131.07 is just 32768/250 to get us our 1deg/sec value */
+            GX = ((float)GX_meas - GX_off) / 131.07f;
+            GY = ((float)GY_meas - GY_off) / 131.07f;
+            GZ = ((float)GZ_meas - GZ_off) / 131.07f;
+            /* Rotation Angles in degrees */
+            pitch = pitch + GX * GYRO_TIMER_PERIOD_SECONDS;
+            roll = roll + GY * GYRO_TIMER_PERIOD_SECONDS;
+            yaw = yaw + GZ * GYRO_TIMER_PERIOD_SECONDS;
+
+            printf("Roll: %5.2f, Pitch: %5.2f, Yaw: %5.2f\n\r", pitch, roll, yaw);
+
+            /* Clear the flag */
+            gyro_timer_interrupt_flag = false;
+        }
     }
 }
 
+/*******************************************************************************
+ * Function Name: gyro_timer_init
+ ********************************************************************************
+ * Summary:
+ * This function creates and configures a Timer object. The timer ticks
+ * continuously and produces a periodic interrupt on every terminal count
+ * event. The period is defined by the 'period' and 'compare_value' of the
+ * timer configuration structure 'led_blink_timer_cfg'. Without any changes,
+ * this application is designed to produce an interrupt every 1 second.
+ *
+ * Parameters:
+ *  none
+ *
+ *******************************************************************************/
+void gyro_timer_init(void)
+{
+    cy_rslt_t result;
+
+    const cyhal_timer_cfg_t gyro_timer_cfg =
+        {
+            .compare_value = 0,              /* Timer compare value, not used */
+            .period = GYRO_TIMER_PERIOD_HZ,  /* Defines the timer period */
+            .direction = CYHAL_TIMER_DIR_UP, /* Timer counts up */
+            .is_compare = false,             /* Don't use compare mode */
+            .is_continuous = true,           /* Run timer indefinitely */
+            .value = 0                       /* Initial value of counter */
+        };
+
+    /* Initialize the timer object. Does not use input pin ('pin' is NC) and
+     * does not use a pre-configured clock source ('clk' is NULL). */
+    result = cyhal_timer_init(&gyro_timer, NC, NULL);
+
+    /* timer init failed. Stop program execution */
+    if (result != CY_RSLT_SUCCESS)
+    {
+        CY_ASSERT(0);
+    }
+
+    /* Configure timer period and operation mode such as count direction,
+       duration */
+    cyhal_timer_configure(&gyro_timer, &gyro_timer_cfg);
+
+    /* Set the frequency of timer's clock source */
+    cyhal_timer_set_frequency(&gyro_timer, GYRO_TIMER_CLOCK_HZ);
+
+    /* Assign the ISR to execute on timer interrupt */
+    cyhal_timer_register_callback(&gyro_timer, gyro_isr_timer, NULL);
+
+    /* Set the event on which timer interrupt occurs and enable it */
+    cyhal_timer_enable_event(&gyro_timer, CYHAL_TIMER_IRQ_TERMINAL_COUNT, 7, true);
+
+    /* Start the timer with the configured settings */
+    cyhal_timer_start(&gyro_timer);
+}
+
+/*******************************************************************************
+ * Function Name: gyro_isr_timer
+ ********************************************************************************
+ * Summary:
+ * This is the interrupt handler function for the timer interrupt.
+ *
+ * Parameters:
+ *    callback_arg    Arguments passed to the interrupt callback
+ *    event            Timer/counter interrupt triggers
+ *
+ *******************************************************************************/
+static void gyro_isr_timer(void *callback_arg, cyhal_timer_event_t event)
+{
+    (void)callback_arg;
+    (void)event;
+
+    /* Set the interrupt flag and process it from the main while(1) loop */
+    gyro_timer_interrupt_flag = true;
+}
 
 /* [] END OF FILE */
