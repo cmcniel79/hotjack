@@ -5,7 +5,6 @@
  *              for ModusToolbox.
  *
  * Related Document: See README.md
- *
  *******************************************************************************/
 
 #include "cybsp.h"
@@ -16,13 +15,12 @@
  * Macros
  *******************************************************************************/
 #define NUM_OF_TESTS 100
-#define GYRO_INTERRUPT_PRIORITY (9u)
 
 /* Gyroscope timer values */
 #define GYRO_TIMER_CLOCK_HZ          (10000)
-#define GYRO_TIMER_PERIOD_SECONDS (0.1f)
-#define GYRO_TIMER_PERIOD_HZ (GYRO_TIMER_PERIOD_SECONDS * GYRO_TIMER_CLOCK_HZ)
-#define GYRO_TIMER_PERIOD_INVERSE (1 / GYRO_TIMER_PERIOD_SECONDS)
+#define GYRO_TIMER_PERIOD_SECONDS    (0.1f)
+#define GYRO_TIMER_PERIOD_HZ         (GYRO_TIMER_PERIOD_SECONDS * GYRO_TIMER_CLOCK_HZ)
+#define GYRO_TIMER_PERIOD_INVERSE    (1 / GYRO_TIMER_PERIOD_SECONDS)
 
 /*******************************************************************************
  * Function Prototypes
