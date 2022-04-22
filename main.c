@@ -17,11 +17,12 @@
 /* Defined Ports  */
 #define LEFT_ENCODER_PIN (P9_5)
 #define RIGHT_ENCODER_PIN (P9_6)
-#define STEER_MOTOR_PIN (P5_6)
+#define STEER_MOTOR_PIN (P6_2)  // only used in Device configurator
 #define DRIVE_MOTOR_PIN (P9_0)
 #define LEFT_ECHO_PIN (P9_1)
 #define CENTER_ECHO_PIN (P9_2)
 #define RIGHT_ECHO_PIN (P9_3)
+#define TRIGGER_PIN (P10_4)  // only used in Device configurator
 
 /* Interrupt Priorities  */
 #define LEFT_ENCODER_PRIORITY (7u)
@@ -102,7 +103,6 @@ cyhal_pwm_t drive_motor_pwm;
 bool steer_timer_flag = false;
 cyhal_timer_t steer_timer;
 uint16_t steer_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
-cyhal_pwm_t steer_motor_pwm;
 
 /* For ultrasonic sensors */
 cyhal_timer_t left_echo_timer;
@@ -151,7 +151,7 @@ int main(void)
     /*******************************************************************************
     * Initialize and calibrate gyroscope
     ********************************************************************************/
-    // init_and_calibrate_gyro();
+    init_and_calibrate_gyro();
 
     /*******************************************************************************
     * Set up Encoder pins and their interrupts
@@ -190,11 +190,14 @@ int main(void)
     cyhal_pwm_start(&drive_motor_pwm);
 
     /*******************************************************************************
-    * Set up Steering Motor PWM 
+    * Set up Steering Motor PWM
+    * !!!! Important !!!!
+    * ---> This PWM is configured through the Device Congigurator, and that is 
+    *       why it uses the CY_TCPWM functions that are found in cy_pdl 
     ********************************************************************************/
-    cyhal_pwm_init(&steer_motor_pwm, STEER_MOTOR_PIN, NULL);
-    cyhal_pwm_set_period(&steer_motor_pwm, MOTORS_PWM_PERIOD, steer_motor_input);
-    cyhal_pwm_start(&steer_motor_pwm);
+    Cy_TCPWM_PWM_Init(TCPWM0, steer_motor_pwm_NUM, &steer_motor_pwm_config);
+    Cy_TCPWM_PWM_Enable(TCPWM0, steer_motor_pwm_NUM);
+    Cy_TCPWM_TriggerStart_Single(TCPWM0, steer_motor_pwm_NUM);
 
     /*******************************************************************************
     * Set up pins for the ultrasonic echo measurements and their interrups
@@ -287,22 +290,22 @@ int main(void)
                 drive_motor_input = DRIVE_PWM_PULSE_MIN_FORWARD;
             }
 
-            // printf("Left: %5u\n\r", left_magnet_count);
-        	// printf("Right: %5u\n\r", right_magnet_count);
-            // printf("Error: %5i\n\r", error_sum);
-        	// printf("Motor Input: %5u\n\r", drive_motor_input);
+            printf("Left: %5u\n\r", left_magnet_count);
+        	printf("Right: %5u\n\r", right_magnet_count);
+            printf("Error: %5i\n\r", error_sum);
+        	printf("Motor Input: %5u\n\r", drive_motor_input);
 
-            // MPU6050_getRotation(&GX_meas, &GY_meas, &GZ_meas);
-            // /* 131.07 is just 32768/250 to get us our 1deg/sec value */
-            // GX = ((float)GX_meas - GX_off) / 131.07f;
-            // GY = ((float)GY_meas - GY_off) / 131.07f;
-            // GZ = ((float)GZ_meas - GZ_off) / 131.07f;
-            // /* Rotation Angles in degrees */
-            // pitch = pitch + GX * DRIVE_TIMER_PERIOD_SECONDS;
-            // roll = roll + GY * DRIVE_TIMER_PERIOD_SECONDS;
-            // yaw = yaw + GZ * DRIVE_TIMER_PERIOD_SECONDS;
+            MPU6050_getRotation(&GX_meas, &GY_meas, &GZ_meas);
+            /* 131.07 is just 32768/250 to get us our 1deg/sec value */
+            GX = ((float)GX_meas - GX_off) / 131.07f;
+            GY = ((float)GY_meas - GY_off) / 131.07f;
+            GZ = ((float)GZ_meas - GZ_off) / 131.07f;
+            /* Rotation Angles in degrees */
+            pitch = pitch + GX * DRIVE_TIMER_PERIOD_SECONDS;
+            roll = roll + GY * DRIVE_TIMER_PERIOD_SECONDS;
+            yaw = yaw + GZ * DRIVE_TIMER_PERIOD_SECONDS;
 
-            // printf("Roll: %5.2f, Pitch: %5.2f, Yaw: %5.2f\n\r", pitch, roll, yaw);
+            printf("Roll: %5.2f, Pitch: %5.2f, Yaw: %5.2f\n\r", pitch, roll, yaw);
 
             /* Reset magnet counts */
             left_magnet_count = 0;
@@ -314,26 +317,26 @@ int main(void)
 
         if (steer_timer_flag)
         {
-            cyhal_pwm_set_period(&steer_motor_pwm, MOTORS_PWM_PERIOD, steer_motor_input);
+            Cy_TCPWM_PWM_SetCompare0(TCPWM0, steer_motor_pwm_NUM, steer_motor_input);
             left_distance_cm = (SPEED_OF_SOUND_CM_PER_US * left_echo_time * 25);
             center_distance_cm = (SPEED_OF_SOUND_CM_PER_US * center_echo_time * 25);
             right_distance_cm = (SPEED_OF_SOUND_CM_PER_US * right_echo_time * 25);
 
             if (left_distance_cm < 40.0)
             {
-                printf("Left Distance in: %3.1f cm \r\n", left_distance_cm);
+                // printf("Left Distance in: %3.1f cm \r\n", left_distance_cm);
                 // Turn right to avoid object
                 steer_motor_input = STEER_PWM_PULSE_MAX_RIGHT;
             }
             else if (center_distance_cm < 40.0)
             {
-                printf("Center Distance in: %3.1f cm \r\n", center_distance_cm);
+                // printf("Center Distance in: %3.1f cm \r\n", center_distance_cm);
                 // Turn to center to reverse
                 steer_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
             }
             else if (right_distance_cm < 40.0)
             {
-                printf("Right Distance in: %3.1f cm \r\n", right_distance_cm);
+                // printf("Right Distance in: %3.1f cm \r\n", right_distance_cm);
                 // Turn left to avoid object
                 steer_motor_input = STEER_PWM_PULSE_MAX_LEFT;
             }
