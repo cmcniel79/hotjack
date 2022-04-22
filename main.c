@@ -17,6 +17,7 @@
 /* Defined Ports  */
 #define LEFT_ENCODER_PIN (P9_5)
 #define RIGHT_ENCODER_PIN (P9_6)
+#define STEER_MOTOR_PIN (P5_6)
 #define DRIVE_MOTOR_PIN (P9_0)
 #define LEFT_ECHO_PIN (P9_1)
 #define CENTER_ECHO_PIN (P9_2)
@@ -33,35 +34,44 @@
 #define MAGNETS_PER_REV (5.0f)
 #define TARGET_SPEED (0.5f)            // in [m/s]
 #define WHEEL_RADIUS (0.033f)          // in [m]
-#define ENCODER_TIMER_CLOCK_HZ (50000) // in [Hz]
 
-/* Encoder timer period values */
-#define ENCODER_TIMER_PERIOD_SECONDS (0.25f)
-#define ENCODER_TIMER_PERIOD_HZ (ENCODER_TIMER_PERIOD_SECONDS * ENCODER_TIMER_CLOCK_HZ)
+/* Constants shared by Drive and Steering Motors PWMs */
+#define MOTORS_PWM_PERIOD (20000u)                 // PWM Period in microseconds = 20,000 us = 20 ms
+#define MOTORS_PWM_WIDTH_NEUTRAL (1500u)           // 1,500 us = 1.5 ms ---> drive motor does not run at this input
+#define MOTORS_TIMER_CLOCK_HZ (50000) // in [Hz]
 
-/* PWM Period in microseconds = 20,000 us = 20 ms */
-#define PWM_PERIOD (20000u)
-#define PWM_PULSE_WIDTH_ZERO_SPEED (1500u)  // 1,500 us = 1.5 ms ---> drive motor does not run at this input
-
-/* PWM Max and Min input for traveling forward (absolute range is 1550(min) - 1795(max) microseconds)*/
-#define PWM_PULSE_WIDTH_MAX_FORWARD (1620u)
-#define PWM_PULSE_WIDTH_MIN_FORWARD (1550u)
-
+/* ONLY FOR DRIVE MOTOR!! */
+#define DRIVE_TIMER_PERIOD_SECONDS (0.25f) // Encoder timer period values
+#define DRIVE_TIMER_PERIOD_HZ (DRIVE_TIMER_PERIOD_SECONDS * MOTORS_TIMER_CLOCK_HZ)
+/* DRIVE MOTOR PWM Max and Min input for traveling forward (absolute range is 1550(min) - 1795(max) microseconds) */
+#define DRIVE_PWM_PULSE_MAX_FORWARD (1620u)
+#define DRIVE_PWM_PULSE_MIN_FORWARD (1550u)
 /* PWM Max and Min input for traveling in reverse (absolute range is 1480(min) - 1250(max) microseconds)*/
-#define PWM_PULSE_WIDTH_MAX_REVERSE (1420u)
-#define PWM_PULSE_WIDTH_MIN_REVERSE (1490u)
+#define DRIVE_PWM_PULSE_MAX_REVERSE (1420u)
+#define DRIVE_PWM_PULSE_MIN_REVERSE (1490u)
 
+/* ONLY FOR STEERING MOTOR!! */
+#define STEER_TIMER_PERIOD_SECONDS (0.1f) // Encoder timer period values
+#define STEER_TIMER_PERIOD_HZ (STEER_TIMER_PERIOD_SECONDS * MOTORS_TIMER_CLOCK_HZ)
+// STEERING MOTOR PWM Values for turning left and right
+#define STEER_PWM_PULSE_MAX_LEFT (1750u)
+#define STEER_PWM_PULSE_MAX_RIGHT (1250u)
+
+/* Ultrasonic Sensor Constants */
 #define ECHO_TIMER_CLOCK_HZ (20000)
 #define ECHO_TIMER_PERIOD_SECONDS (0.5f)
 #define ECHO_TIMER_PERIOD_HZ (ECHO_TIMER_PERIOD_SECONDS * ECHO_TIMER_CLOCK_HZ)
-
 #define SPEED_OF_SOUND_CM_PER_US (0.034f)
+
+/* Gyroscope Constants */
+#define GYRO_NUM_OF_TESTS (100)
 
 /*******************************************************************************
  * Function Prototypes
  ********************************************************************************/
-static void pid_timer_init(void);
-static void pid_timer_handler(void *handler_arg, cyhal_gpio_event_t event);
+static void motor_timers_init(void);
+static void drive_timer_handler(void *handler_arg, cyhal_gpio_event_t event);
+static void steer_timer_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void left_encoder_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void right_encoder_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void calibration_btn_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event);
@@ -70,31 +80,31 @@ static void echo_timers_init(void);
 static void left_echo_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void center_echo_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void right_echo_handler(void *handler_arg, cyhal_gpio_event_t event);
+static void init_and_calibrate_gyro(void);
 
 /*******************************************************************************
  * Global Variables
  ********************************************************************************/
-bool pid_timer_flag = false;
-bool drive_is_calibrated = false;
+
+/* For Encoders */
 uint16_t left_magnet_count = 0;
 uint16_t right_magnet_count = 0;
-float target_magnet_count = (TARGET_SPEED / WHEEL_RADIUS) * ENCODER_TIMER_PERIOD_SECONDS * (1 / (6.28f)) * MAGNETS_PER_REV;
+float target_magnet_count = (TARGET_SPEED / WHEEL_RADIUS) * DRIVE_TIMER_PERIOD_SECONDS * (1 / (6.28f)) * MAGNETS_PER_REV;
 
-/* Drive Motor Input command, defined in microseconds */
-uint16_t drive_motor_input = PWM_PULSE_WIDTH_ZERO_SPEED;
-
-/* Timer object used for setting when motor input is applied */
-cyhal_timer_t pid_timer;
-
-/* PWM object for drive motor */
+/* For Drive Motor */
+bool drive_timer_flag = false;
+bool drive_is_calibrated = false;
+cyhal_timer_t drive_timer;
+uint16_t drive_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
 cyhal_pwm_t drive_motor_pwm;
 
-cy_stc_sysint_t ISR_ultra_trig_config = {
-    .intrSrc = (IRQn_Type) ultra_trig_pwm_IRQ,
-    .intrPriority = TRIG_PRIORITY
-};
+/* For Steer Motor */
+bool steer_timer_flag = false;
+cyhal_timer_t steer_timer;
+uint16_t steer_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
+cyhal_pwm_t steer_motor_pwm;
 
-/* Objects and variables used for ultrasonic sensors */
+/* For ultrasonic sensors */
 cyhal_timer_t left_echo_timer;
 uint32_t left_echo_time;
 bool left_echo_is_pulsing;
@@ -104,6 +114,18 @@ bool center_echo_is_pulsing;
 cyhal_timer_t right_echo_timer;
 uint32_t right_echo_time;
 bool right_echo_is_pulsing;
+
+/* For ultrasonic trigger interrupt config */
+cy_stc_sysint_t ISR_ultra_trig_config = {
+    .intrSrc = (IRQn_Type) ultra_trig_pwm_IRQ,
+    .intrPriority = TRIG_PRIORITY
+};
+
+/* For gyroscope */
+int16_t GX_meas, GY_meas, GZ_meas; // raw gyroscope values (sensor outputs integers!)
+float GX_off, GY_off, GZ_off;      // gyroscope offset values
+float GX, GY, GZ;                  // gyroscope floats
+float pitch, roll, yaw;            // current pitch, roll and yaw angles
 
 /*******************************************************************************
  * Function Name: main
@@ -121,9 +143,15 @@ int main(void)
     {
         CY_ASSERT(0);
     }
+
     /* Initialize retarget-io to use the debug UART port */
     cy_retarget_io_init(CYBSP_DEBUG_UART_TX, CYBSP_DEBUG_UART_RX,
                                  CY_RETARGET_IO_BAUDRATE);
+
+    /*******************************************************************************
+    * Initialize and calibrate gyroscope
+    ********************************************************************************/
+    // init_and_calibrate_gyro();
 
     /*******************************************************************************
     * Set up Encoder pins and their interrupts
@@ -158,8 +186,15 @@ int main(void)
     * Set up Drive Motor PWM 
     ********************************************************************************/
     cyhal_pwm_init(&drive_motor_pwm, DRIVE_MOTOR_PIN, NULL);
-    cyhal_pwm_set_period(&drive_motor_pwm, PWM_PERIOD, drive_motor_input);
+    cyhal_pwm_set_period(&drive_motor_pwm, MOTORS_PWM_PERIOD, drive_motor_input);
     cyhal_pwm_start(&drive_motor_pwm);
+
+    /*******************************************************************************
+    * Set up Steering Motor PWM 
+    ********************************************************************************/
+    cyhal_pwm_init(&steer_motor_pwm, STEER_MOTOR_PIN, NULL);
+    cyhal_pwm_set_period(&steer_motor_pwm, MOTORS_PWM_PERIOD, steer_motor_input);
+    cyhal_pwm_start(&steer_motor_pwm);
 
     /*******************************************************************************
     * Set up pins for the ultrasonic echo measurements and their interrups
@@ -210,7 +245,7 @@ int main(void)
     printf("Target Magnet Count: %5.3f\n\r", target_magnet_count);
 
     /* Initialize timer for control loop */
-    pid_timer_init();
+    motor_timers_init();
 
     float error = 0.0f;
     float error_integral = 0.0f;
@@ -227,29 +262,29 @@ int main(void)
     for (;;)
     {
         /* Check the interrupt status */
-        if (pid_timer_flag && drive_is_calibrated)
+        if (drive_timer_flag && drive_is_calibrated)
         {
             /* Apply previously calculated drive motor input */
-             result = cyhal_pwm_set_period(&drive_motor_pwm, PWM_PERIOD, drive_motor_input);
+            cyhal_pwm_set_period(&drive_motor_pwm, MOTORS_PWM_PERIOD, drive_motor_input);
 
             /* Calculate error term from encoder measurements */
             magnet_avg = (left_magnet_count + right_magnet_count) / 2.0f;
             error = target_magnet_count - magnet_avg;
-            error_integral = error_integral + error * ENCODER_TIMER_PERIOD_SECONDS;
+            error_integral = error_integral + error * DRIVE_TIMER_PERIOD_SECONDS;
 
             /* Calculate drive motor input for next time step */
             error_sum = (int)(error * kp + error_integral * ki);
-            drive_motor_input = PWM_PULSE_WIDTH_MIN_FORWARD + error_sum;
+            drive_motor_input = DRIVE_PWM_PULSE_MIN_FORWARD + error_sum;
 
             /*Perform Checks on the calculated input */
-            if (drive_motor_input > PWM_PULSE_WIDTH_MAX_FORWARD)
+            if (drive_motor_input > DRIVE_PWM_PULSE_MAX_FORWARD)
             {
-                drive_motor_input = PWM_PULSE_WIDTH_MAX_FORWARD;
+                drive_motor_input = DRIVE_PWM_PULSE_MAX_FORWARD;
             }
 
-            else if (drive_motor_input < PWM_PULSE_WIDTH_MIN_FORWARD)
+            else if (drive_motor_input < DRIVE_PWM_PULSE_MIN_FORWARD)
             {
-                drive_motor_input = PWM_PULSE_WIDTH_MIN_FORWARD;
+                drive_motor_input = DRIVE_PWM_PULSE_MIN_FORWARD;
             }
 
             // printf("Left: %5u\n\r", left_magnet_count);
@@ -257,25 +292,52 @@ int main(void)
             // printf("Error: %5i\n\r", error_sum);
         	// printf("Motor Input: %5u\n\r", drive_motor_input);
 
+            // MPU6050_getRotation(&GX_meas, &GY_meas, &GZ_meas);
+            // /* 131.07 is just 32768/250 to get us our 1deg/sec value */
+            // GX = ((float)GX_meas - GX_off) / 131.07f;
+            // GY = ((float)GY_meas - GY_off) / 131.07f;
+            // GZ = ((float)GZ_meas - GZ_off) / 131.07f;
+            // /* Rotation Angles in degrees */
+            // pitch = pitch + GX * DRIVE_TIMER_PERIOD_SECONDS;
+            // roll = roll + GY * DRIVE_TIMER_PERIOD_SECONDS;
+            // yaw = yaw + GZ * DRIVE_TIMER_PERIOD_SECONDS;
+
+            // printf("Roll: %5.2f, Pitch: %5.2f, Yaw: %5.2f\n\r", pitch, roll, yaw);
+
             /* Reset magnet counts */
             left_magnet_count = 0;
             right_magnet_count = 0;
 
             /* Clear the flag */
-            pid_timer_flag = false;
+            drive_timer_flag = false;
         }
-            
-        left_distance_cm = (SPEED_OF_SOUND_CM_PER_US * left_echo_time * 25);
-        if (left_distance_cm < 40.0) {
-            printf("Left Distance in: %3.1f cm \r\n", left_distance_cm);
-        }
-        center_distance_cm = (SPEED_OF_SOUND_CM_PER_US * center_echo_time * 25);
-        if (center_distance_cm < 40.0) {
-            printf("Center Distance in: %3.1f cm \r\n", center_distance_cm);
-        }
-        right_distance_cm = (SPEED_OF_SOUND_CM_PER_US * right_echo_time * 25);
-        if (right_distance_cm < 40.0) {
-            printf("Right Distance in: %3.1f cm \r\n", right_distance_cm);
+
+        if (steer_timer_flag)
+        {
+            cyhal_pwm_set_period(&steer_motor_pwm, MOTORS_PWM_PERIOD, steer_motor_input);
+            left_distance_cm = (SPEED_OF_SOUND_CM_PER_US * left_echo_time * 25);
+            center_distance_cm = (SPEED_OF_SOUND_CM_PER_US * center_echo_time * 25);
+            right_distance_cm = (SPEED_OF_SOUND_CM_PER_US * right_echo_time * 25);
+
+            if (left_distance_cm < 40.0)
+            {
+                printf("Left Distance in: %3.1f cm \r\n", left_distance_cm);
+                // Turn right to avoid object
+                steer_motor_input = STEER_PWM_PULSE_MAX_RIGHT;
+            }
+            else if (center_distance_cm < 40.0)
+            {
+                printf("Center Distance in: %3.1f cm \r\n", center_distance_cm);
+                // Turn to center to reverse
+                steer_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
+            }
+            else if (right_distance_cm < 40.0)
+            {
+                printf("Right Distance in: %3.1f cm \r\n", right_distance_cm);
+                // Turn left to avoid object
+                steer_motor_input = STEER_PWM_PULSE_MAX_LEFT;
+            }
+            steer_timer_flag = false;
         }
     }
 }
@@ -304,41 +366,69 @@ static void calibration_btn_interrupt_handler(void *handler_arg, cyhal_gpio_irq_
 	drive_is_calibrated = true;
 }
 
-/* Initialize PID timer */
-static void pid_timer_init(void)
+/* Initialize motor timers */
+static void motor_timers_init(void)
 {
-    cy_rslt_t result;
-
-    const cyhal_timer_cfg_t pid_timer_cfg =
+    // Config for drive motor timer
+    const cyhal_timer_cfg_t drive_timer_cfg =
         {
             .compare_value = 0,                /* Timer compare value, not used */
-            .period = ENCODER_TIMER_PERIOD_HZ, /* Defines the timer period */
+            .period = DRIVE_TIMER_PERIOD_HZ, /* Defines the timer period */
             .direction = CYHAL_TIMER_DIR_UP,   /* Timer counts up */
             .is_compare = false,               /* Don't use compare mode */
             .is_continuous = true,             /* Run timer indefinitely */
             .value = 0                         /* Initial value of counter */
         };
 
-    cyhal_timer_init(&pid_timer, NC, NULL);
-    cyhal_timer_configure(&pid_timer, &pid_timer_cfg);
-    cyhal_timer_set_frequency(&pid_timer, ENCODER_TIMER_CLOCK_HZ);
-    cyhal_timer_register_callback(&pid_timer, pid_timer_handler, NULL);
-    cyhal_timer_enable_event(&pid_timer, CYHAL_TIMER_IRQ_TERMINAL_COUNT,
+    // Initialize drive timer at a 
+    cyhal_timer_init(&drive_timer, NC, NULL);
+    cyhal_timer_configure(&drive_timer, &drive_timer_cfg);
+    cyhal_timer_set_frequency(&drive_timer, MOTORS_TIMER_CLOCK_HZ);
+    cyhal_timer_register_callback(&drive_timer, drive_timer_handler, NULL);
+    cyhal_timer_enable_event(&drive_timer, CYHAL_TIMER_IRQ_TERMINAL_COUNT,
                              7, true);
-    cyhal_timer_start(&pid_timer);
+    cyhal_timer_start(&drive_timer);
+
+    // Config for steer motor timer
+    const cyhal_timer_cfg_t steer_timer_cfg =
+        {
+            .compare_value = 0,                /* Timer compare value, not used */
+            .period = STEER_TIMER_PERIOD_HZ, /* Defines the timer period */
+            .direction = CYHAL_TIMER_DIR_UP,   /* Timer counts up */
+            .is_compare = false,               /* Don't use compare mode */
+            .is_continuous = true,             /* Run timer indefinitely */
+            .value = 0                         /* Initial value of counter */
+        };
+
+    // Initialize drive timer at a 
+    cyhal_timer_init(&steer_timer, NC, NULL);
+    cyhal_timer_configure(&steer_timer, &steer_timer_cfg);
+    cyhal_timer_set_frequency(&steer_timer, MOTORS_TIMER_CLOCK_HZ);
+    cyhal_timer_register_callback(&steer_timer, steer_timer_handler, NULL);
+    cyhal_timer_enable_event(&steer_timer, CYHAL_TIMER_IRQ_TERMINAL_COUNT,
+                             7, true);
+    cyhal_timer_start(&steer_timer);
 }
 
-/* Set pid timer flag to true when PID timer finishes count */
-static void pid_timer_handler(void *handler_arg, cyhal_gpio_event_t event)
+/* Set drive motor timer flag to true when timer finishes count */
+static void drive_timer_handler(void *handler_arg, cyhal_gpio_event_t event)
 {
     (void)handler_arg;
     (void)event;
 
-    /* Set the interrupt flag and process it from the main while(1) loop */
-    pid_timer_flag = true;
+    drive_timer_flag = true;
 }
 
-/* Fires the pulse on the trigger pin to start measuring on ultrasonic sensors */
+/* Set steer motor timer flag to true when timer finishes count */
+static void steer_timer_handler(void *handler_arg, cyhal_gpio_event_t event)
+{
+    (void)handler_arg;
+    (void)event;
+
+    steer_timer_flag = true;
+}
+
+/* Clears the trigger PWM interrupt and gets ready for the next one */
 static void ultra_trig_handler(void)
 {
     Cy_TCPWM_ClearInterrupt(ultra_trig_pwm_HW, ultra_trig_pwm_NUM, CY_TCPWM_INT_ON_TC);
@@ -348,8 +438,6 @@ static void ultra_trig_handler(void)
 /* Initialize all of the Echo timers */
 static void echo_timers_init(void)
 {
-    cy_rslt_t result;
-
     const cyhal_timer_cfg_t echo_timer_cfg =
         {
             .compare_value = 0,              
@@ -365,19 +453,19 @@ static void echo_timers_init(void)
     cyhal_timer_init(&left_echo_timer, NC, NULL);
     cyhal_timer_configure(&left_echo_timer, &echo_timer_cfg);
     cyhal_timer_set_frequency(&left_echo_timer, ECHO_TIMER_CLOCK_HZ);
+
     /* CENTER Echo Init */
     cyhal_timer_init(&center_echo_timer, NC, NULL);
     cyhal_timer_configure(&center_echo_timer, &echo_timer_cfg);
     cyhal_timer_set_frequency(&center_echo_timer, ECHO_TIMER_CLOCK_HZ);
+
     /* RIGHT Echo Init */
     cyhal_timer_init(&right_echo_timer, NC, NULL);
     cyhal_timer_configure(&right_echo_timer, &echo_timer_cfg);
     cyhal_timer_set_frequency(&right_echo_timer, ECHO_TIMER_CLOCK_HZ);
 }
 
-/*******************************************************************************
- * Function Name: left_echo_handler
- *******************************************************************************/
+/* Records time from the pin on the left ultrasonic sensor */
 static void left_echo_handler(void *handler_arg, cyhal_gpio_irq_event_t event)
 {
     (void)handler_arg;
@@ -393,9 +481,7 @@ static void left_echo_handler(void *handler_arg, cyhal_gpio_irq_event_t event)
     }
 }
 
-/*******************************************************************************
- * Function Name: center_echo_handler
- *******************************************************************************/
+/* Records time from the pin on the center ultrasonic sensor */
 static void center_echo_handler(void *handler_arg, cyhal_gpio_irq_event_t event)
 {
     (void)handler_arg;
@@ -411,9 +497,7 @@ static void center_echo_handler(void *handler_arg, cyhal_gpio_irq_event_t event)
     }
 }
 
-/*******************************************************************************
- * Function Name: right_echo_handler
- *******************************************************************************/
+/* Records time from the pin on the right ultrasonic sensor */
 static void right_echo_handler(void *handler_arg, cyhal_gpio_irq_event_t event)
 {
     (void)handler_arg;
@@ -427,6 +511,35 @@ static void right_echo_handler(void *handler_arg, cyhal_gpio_irq_event_t event)
         cyhal_timer_start(&right_echo_timer);
         right_echo_is_pulsing = true;
     }
+}
+
+/* Initializes gyro sensor, and calibrates it with 100 tests in quick succession */
+static void init_and_calibrate_gyro(void)
+{
+    /* Initizalize PSOC I2C Communication w/ MPU6050 */
+    I2C_MPU6050_init();
+    /* Initizalize MPU6050 */
+    MPU6050_full_init();
+
+    int i = 0; // for loop increment variable
+    for (i = 0; i < GYRO_NUM_OF_TESTS; i++)
+    {
+        printf("Test Number: %d \n\r", i);
+
+        MPU6050_getRotation(&GX_meas, &GY_meas, &GZ_meas);
+        GX_off += GX_meas;
+        GY_off += GY_meas;
+        GZ_off += GZ_meas;
+
+        printf(" GX:%d, GY:%d, GZ:%d,\t", GX_meas, GY_meas, GZ_meas);
+        cyhal_system_delay_ms(25);
+    }
+    GX_off = GX_off / GYRO_NUM_OF_TESTS;
+    GY_off = GY_off / GYRO_NUM_OF_TESTS;
+    GZ_off = GZ_off / GYRO_NUM_OF_TESTS;
+
+    printf("\n\nTest finished, offset values are shown below: \n\n\r");
+    printf("GXoff:%d, GYoff:%d, GZoff:%d\t", (int)GX_off, (int)GY_off, (int)GZ_off);
 }
 
 /* [] END OF FILE */
