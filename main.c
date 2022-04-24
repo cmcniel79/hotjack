@@ -17,8 +17,8 @@
 /* Defined Ports  */
 #define LEFT_ENCODER_PIN (P9_5)
 #define RIGHT_ENCODER_PIN (P9_6)
-#define STEER_MOTOR_PIN (P6_2)  // only used in Device configurator
 #define DRIVE_MOTOR_PIN (P9_0)
+#define STEER_MOTOR_PIN (P6_2)  // only used in Device configurator
 #define LEFT_ECHO_PIN (P9_1)
 #define CENTER_ECHO_PIN (P9_2)
 #define RIGHT_ECHO_PIN (P9_3)
@@ -45,7 +45,7 @@
 #define DRIVE_TIMER_PERIOD_SECONDS (0.25f) // Encoder timer period values
 #define DRIVE_TIMER_PERIOD_HZ (DRIVE_TIMER_PERIOD_SECONDS * MOTORS_TIMER_CLOCK_HZ)
 /* DRIVE MOTOR PWM Max and Min input for traveling forward (absolute range is 1550(min) - 1795(max) microseconds) */
-#define DRIVE_PWM_PULSE_MAX_FORWARD (1620u)
+#define DRIVE_PWM_PULSE_MAX_FORWARD (1590u)
 #define DRIVE_PWM_PULSE_MIN_FORWARD (1550u)
 /* PWM Max and Min input for traveling in reverse (absolute range is 1480(min) - 1250(max) microseconds)*/
 #define DRIVE_PWM_PULSE_MAX_REVERSE (1420u)
@@ -67,6 +67,10 @@
 /* Gyroscope Constants */
 #define GYRO_NUM_OF_TESTS (100)
 
+/* Constants for robot taks */
+#define SEARCH_DISTANCE_LENGTH (1.00f) // in [m]
+#define DISTANCE_PER_REV (WHEEL_RADIUS * 6.283f)
+#define SEARCH_DISTANCE_MAGNET_COUNT (SEARCH_DISTANCE_LENGTH / DISTANCE_PER_REV) * MAGNETS_PER_REV;
 /*******************************************************************************
  * Function Prototypes
  ********************************************************************************/
@@ -250,6 +254,7 @@ int main(void)
     /* Initialize timer for control loop */
     motor_timers_init();
 
+    // Variables for drive motor controller
     float error = 0.0f;
     float error_integral = 0.0f;
     int16_t error_sum = 0;
@@ -258,9 +263,16 @@ int main(void)
     float kp = 1.0f;
     float ki = 0.05f;
 
+    // Variables for ultrasonic sensor measurements
     float left_distance_cm = 0.0f;
     float center_distance_cm = 0.0f;
     float right_distance_cm = 0.0f;
+
+    // Variables for robot searching
+    bool is_next_turn_left = true;
+    bool is_currently_turning = false;
+    int travel_distance_mag_count = (int)SEARCH_DISTANCE_MAGNET_COUNT;
+    float turn_starting_yaw = 0.0f;
 
     for (;;)
     {
@@ -274,6 +286,9 @@ int main(void)
             magnet_avg = (left_magnet_count + right_magnet_count) / 2.0f;
             error = target_magnet_count - magnet_avg;
             error_integral = error_integral + error * DRIVE_TIMER_PERIOD_SECONDS;
+
+            // Update travel distance magnet count with the average distance traveled in past time step
+            travel_distance_mag_count -= magnet_avg;
 
             /* Calculate drive motor input for next time step */
             error_sum = (int)(error * kp + error_integral * ki);
@@ -290,22 +305,22 @@ int main(void)
                 drive_motor_input = DRIVE_PWM_PULSE_MIN_FORWARD;
             }
 
-            printf("Left: %5u\n\r", left_magnet_count);
-        	printf("Right: %5u\n\r", right_magnet_count);
-            printf("Error: %5i\n\r", error_sum);
-        	printf("Motor Input: %5u\n\r", drive_motor_input);
+            // printf("Left: %5u\n\r", left_magnet_count);
+        	// printf("Right: %5u\n\r", right_magnet_count);
+            // printf("Error: %5i\n\r", error_sum);
+        	// printf("Motor Input: %5u\n\r", drive_motor_input);
 
-            MPU6050_getRotation(&GX_meas, &GY_meas, &GZ_meas);
-            /* 131.07 is just 32768/250 to get us our 1deg/sec value */
-            GX = ((float)GX_meas - GX_off) / 131.07f;
-            GY = ((float)GY_meas - GY_off) / 131.07f;
-            GZ = ((float)GZ_meas - GZ_off) / 131.07f;
-            /* Rotation Angles in degrees */
-            pitch = pitch + GX * DRIVE_TIMER_PERIOD_SECONDS;
-            roll = roll + GY * DRIVE_TIMER_PERIOD_SECONDS;
-            yaw = yaw + GZ * DRIVE_TIMER_PERIOD_SECONDS;
+            // MPU6050_getRotation(&GX_meas, &GY_meas, &GZ_meas);
+            // /* 131.07 is just 32768/250 to get us our 1deg/sec value */
+            // GX = ((float)GX_meas - GX_off) / 131.07f;
+            // GY = ((float)GY_meas - GY_off) / 131.07f;
+            // GZ = ((float)GZ_meas - GZ_off) / 131.07f;
+            // /* Rotation Angles in degrees */
+            // pitch = pitch + GX * DRIVE_TIMER_PERIOD_SECONDS;
+            // roll = roll + GY * DRIVE_TIMER_PERIOD_SECONDS;
+            // yaw = yaw + GZ * DRIVE_TIMER_PERIOD_SECONDS;
 
-            printf("Roll: %5.2f, Pitch: %5.2f, Yaw: %5.2f\n\r", pitch, roll, yaw);
+            // printf("Yaw: %5.2f\n\r", yaw);
 
             /* Reset magnet counts */
             left_magnet_count = 0;
@@ -317,29 +332,66 @@ int main(void)
 
         if (steer_timer_flag)
         {
+            /* Apply previously calculated steering motor input */
             Cy_TCPWM_PWM_SetCompare0(TCPWM0, steer_motor_pwm_NUM, steer_motor_input);
+
+            /* Get ultrasonics sensor measurements */
             left_distance_cm = (SPEED_OF_SOUND_CM_PER_US * left_echo_time * 25);
             center_distance_cm = (SPEED_OF_SOUND_CM_PER_US * center_echo_time * 25);
             right_distance_cm = (SPEED_OF_SOUND_CM_PER_US * right_echo_time * 25);
+            
+            /* Get yaw measurement from gyro */
+            MPU6050_getRotation(&GX_meas, &GY_meas, &GZ_meas);
+            GZ = ((float)GZ_meas - GZ_off) / 131.07f; // 131.07 is just 32768/250 to get us our 1deg/sec value
+            yaw = yaw + GZ * STEER_TIMER_PERIOD_SECONDS; // Rotation Angles in degrees
 
-            if (left_distance_cm < 40.0)
+            // Set variables to start turning 180 in either direction
+            if(travel_distance_mag_count <= 0 && !is_currently_turning) 
             {
-                // printf("Left Distance in: %3.1f cm \r\n", left_distance_cm);
-                // Turn right to avoid object
+                is_currently_turning = true;
+                turn_starting_yaw = yaw;
+                steer_motor_input = is_next_turn_left ? STEER_PWM_PULSE_MAX_LEFT : STEER_PWM_PULSE_MAX_RIGHT;
+            } 
+            // For turning 180 degrees left
+            else if(is_currently_turning && is_next_turn_left && yaw <= turn_starting_yaw + 180) 
+            {
+                steer_motor_input = STEER_PWM_PULSE_MAX_LEFT;
+            } 
+            // For turning 180 degrees right
+            else if(is_currently_turning && !is_next_turn_left && yaw >= turn_starting_yaw - 180) 
+            {
                 steer_motor_input = STEER_PWM_PULSE_MAX_RIGHT;
-            }
-            else if (center_distance_cm < 40.0)
+            } 
+            // Reset variables for when turn is finished
+            else if(is_currently_turning && 
+                ((is_next_turn_left && yaw >= turn_starting_yaw + 180) || (!is_next_turn_left && yaw <= turn_starting_yaw - 180)))
             {
-                // printf("Center Distance in: %3.1f cm \r\n", center_distance_cm);
-                // Turn to center to reverse
+                is_currently_turning = false;
+                travel_distance_mag_count = (int)SEARCH_DISTANCE_MAGNET_COUNT;
+                is_next_turn_left = !is_next_turn_left;
                 steer_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
             }
-            else if (right_distance_cm < 40.0)
-            {
-                // printf("Right Distance in: %3.1f cm \r\n", right_distance_cm);
-                // Turn left to avoid object
-                steer_motor_input = STEER_PWM_PULSE_MAX_LEFT;
-            }
+
+            // if (left_distance_cm < 40.0)
+            // {
+            //     // printf("Left Distance in: %3.1f cm \r\n", left_distance_cm);
+            //     // Turn right to avoid object
+            //     steer_motor_input = STEER_PWM_PULSE_MAX_RIGHT;
+            // }
+            // else if (center_distance_cm < 40.0)
+            // {
+            //     // printf("Center Distance in: %3.1f cm \r\n", center_distance_cm);
+            //     // Turn to center to reverse
+            //     steer_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
+            // }
+            // else if (right_distance_cm < 40.0)
+            // {
+            //     // printf("Right Distance in: %3.1f cm \r\n", right_distance_cm);
+            //     // Turn left to avoid object
+            //     steer_motor_input = STEER_PWM_PULSE_MAX_LEFT;
+            // }
+
+            /* Clear the flag */
             steer_timer_flag = false;
         }
     }
