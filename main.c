@@ -260,24 +260,34 @@ int main(void)
     motor_timers_init();
 
     // Variables for drive motor controller
-    float error = 0.0f;
-    float error_integral = 0.0f;
-    int16_t error_sum = 0;
+    float error_drive = 0.0f;
+    float error_integral_drive = 0.0f;
+    int16_t error_sum_drive = 0;
 
     float magnet_avg;
-    float kp = 1.0f;
-    float ki = 0.05f;
+    float kp_drive = 1.0f;
+    float ki_drive = 0.05f;
+
+    // Variables for steering motor controller
+    float error_steer = 0.0f;
+    float error_integral_steer = 0.0f;
+    int16_t error_sum_steer = 0;
+
+    float kp_steer = 10.0f;
+    float ki_steer = 0.5f;
 
     // Variables for ultrasonic sensor measurements
     float left_distance_cm = 0.0f;
     float center_distance_cm = 0.0f;
     float right_distance_cm = 0.0f;
 
-    // Variables for robot searching
+    /* Variables for robot searching 
+        These conditions are set for the robot turning left first*/
     bool is_next_turn_left = true;
     bool is_currently_turning_first_half = false;
     bool is_currently_turning_second_half = false;
     bool should_reverse = false;
+    bool should_use_steer_PID = true;
     int travel_distance_mag_count = (int)SEARCH_DISTANCE_MAGNET_COUNT;
     int reverse_distance_mag_count = (int)REVERSE_DISTANCE_MAGNET_COUNT;
 
@@ -291,8 +301,8 @@ int main(void)
 
             /* Calculate error term from encoder measurements */
             magnet_avg = (left_magnet_count + right_magnet_count) / 2.0f;
-            error = target_magnet_count - magnet_avg;
-            error_integral = error_integral + error * DRIVE_TIMER_PERIOD_SECONDS;
+            error_drive = target_magnet_count - magnet_avg;
+            error_integral_drive = error_integral_drive + error_drive * DRIVE_TIMER_PERIOD_SECONDS;
 
             // Update travel distance magnet count with the average distance traveled in past time step
             if (!is_currently_turning_first_half && !is_currently_turning_second_half)
@@ -306,8 +316,9 @@ int main(void)
             }
 
             /* Calculate drive motor input for next time step */
-            error_sum = (int)(error * kp + error_integral * ki);
-            drive_motor_input = !should_reverse ? DRIVE_PWM_PULSE_MIN_FORWARD + error_sum : DRIVE_PWM_PULSE_MIN_REVERSE - error_sum;
+            error_sum_drive = (int)(error_drive * kp_drive + error_integral_drive * ki_drive);
+            drive_motor_input = !should_reverse ? 
+                DRIVE_PWM_PULSE_MIN_FORWARD + error_sum_drive : DRIVE_PWM_PULSE_MIN_REVERSE - error_sum_drive;
 
             /*Perform Checks on the calculated input */
             if (!should_reverse)
@@ -380,6 +391,7 @@ int main(void)
             {
                 is_currently_turning_first_half = true;
                 steer_motor_input = is_next_turn_left ? STEER_PWM_PULSE_MAX_LEFT : STEER_PWM_PULSE_MAX_RIGHT;
+                should_use_steer_PID = false;
             }
             /* CHECK CONDITIONS FOR FIRST HALF OF TURN */
             // For turning first 90 degrees left
@@ -433,7 +445,29 @@ int main(void)
                 travel_distance_mag_count = (int)SEARCH_DISTANCE_MAGNET_COUNT;
                 reverse_distance_mag_count = (int)REVERSE_DISTANCE_MAGNET_COUNT;
                 is_next_turn_left = !is_next_turn_left;
-                steer_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
+                should_use_steer_PID = true;
+                error_integral_steer = 0.0f;
+            }
+
+            // Only use steer PID when going straight
+            if (should_use_steer_PID)
+            {
+            float target_yaw = is_next_turn_left ? 0.0f : 180.0f;
+            error_steer = target_yaw - yaw;
+            error_integral_steer = error_integral_steer + error_steer * STEER_TIMER_PERIOD_SECONDS;
+
+            /* Calculate drive motor input for next time step */
+            error_sum_steer = (int)(error_steer * kp_steer + error_integral_steer * ki_steer);
+            steer_motor_input = STEER_PWM_PULSE_NEUTRAL + error_sum_steer;
+
+                if (steer_motor_input > STEER_PWM_PULSE_MAX_LEFT)
+                {
+                    steer_motor_input = STEER_PWM_PULSE_MAX_LEFT;
+                }
+                else if (steer_motor_input < STEER_PWM_PULSE_MAX_RIGHT)
+                {
+                    steer_motor_input = STEER_PWM_PULSE_MAX_RIGHT;
+                }
             }
             // if (left_distance_cm < 40.0)
             // {
