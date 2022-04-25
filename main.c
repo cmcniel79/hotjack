@@ -281,8 +281,8 @@ int main(void)
     float center_distance_cm = 0.0f;
     float right_distance_cm = 0.0f;
 
-    /* Variables for robot searching 
-        These conditions are set for the robot turning left first*/
+    /* Variables for robot searching
+        These conditions are set for the robot turning left first */
     bool is_next_turn_left = true;
     bool is_currently_turning_first_half = false;
     bool is_currently_turning_second_half = false;
@@ -386,8 +386,8 @@ int main(void)
             yaw = yaw + GZ * STEER_TIMER_PERIOD_SECONDS; // Rotation Angles in degrees
 
             // Set variables to start turning the first 90 degrees in either direction
-            if (travel_distance_mag_count <= 0 && !should_reverse 
-            && !is_currently_turning_first_half && !is_currently_turning_second_half)
+            if (travel_distance_mag_count <= 0 && !should_reverse && !is_currently_turning_first_half 
+                && !is_currently_turning_second_half)
             {
                 is_currently_turning_first_half = true;
                 steer_motor_input = is_next_turn_left ? STEER_PWM_PULSE_MAX_LEFT : STEER_PWM_PULSE_MAX_RIGHT;
@@ -396,19 +396,19 @@ int main(void)
             /* CHECK CONDITIONS FOR FIRST HALF OF TURN */
             // For turning first 90 degrees left
             else if (is_currently_turning_first_half && !is_currently_turning_second_half 
-            && is_next_turn_left && yaw <= 90)
+                && is_next_turn_left && yaw <= 90)
             {
                 steer_motor_input = STEER_PWM_PULSE_MAX_LEFT;
             }
             // For turning first 90 degrees right
             else if (is_currently_turning_first_half && !is_currently_turning_second_half 
-            && !is_next_turn_left && yaw >= 90)
+                && !is_next_turn_left && yaw >= 90)
             {
                 steer_motor_input = STEER_PWM_PULSE_MAX_RIGHT;
             }
             // Set variables to reverse when turn is halfway finished
             else if (is_currently_turning_first_half && !is_currently_turning_second_half 
-            && ((is_next_turn_left && yaw >= 90) || (!is_next_turn_left && yaw <= 90)))
+                && ((is_next_turn_left && yaw >= 90) || (!is_next_turn_left && yaw <= 90)))
             {
                 is_currently_turning_first_half = false;
                 should_reverse = true;
@@ -416,7 +416,7 @@ int main(void)
             }
             // Set variables to stop reversing
             else if (reverse_distance_mag_count <= 0 && should_reverse 
-            && !is_currently_turning_first_half && !is_currently_turning_second_half)
+                && !is_currently_turning_first_half && !is_currently_turning_second_half)
             {
                 is_currently_turning_second_half = true;
                 should_reverse = false;
@@ -424,20 +424,20 @@ int main(void)
             }
             /* CHECK CONDITIONS FOR SECOND HALF OF TURN */
             // For turning second 90 degrees left
-            else if (!is_currently_turning_first_half && is_currently_turning_second_half 
-            && is_next_turn_left && yaw <= 180)
+            else if (!is_currently_turning_first_half && is_currently_turning_second_half
+                 && is_next_turn_left && yaw <= 180)
             {
                 steer_motor_input = STEER_PWM_PULSE_MAX_LEFT;
             }
             // For turning second 90 degrees right
             else if (!is_currently_turning_first_half && is_currently_turning_second_half 
-            && !is_next_turn_left && yaw >= 0)
+                && !is_next_turn_left && yaw >= 0)
             {
                 steer_motor_input = STEER_PWM_PULSE_MAX_RIGHT;
             }
             // Set variables to reset when full turn is finished
             else if (!is_currently_turning_first_half && is_currently_turning_second_half 
-            && ((is_next_turn_left && yaw >= 180) || (!is_next_turn_left && yaw <= 0)))
+                && ((is_next_turn_left && yaw >= 180) || (!is_next_turn_left && yaw <= 0)))
             {
                 is_currently_turning_first_half = false;
                 is_currently_turning_second_half = false;
@@ -452,13 +452,13 @@ int main(void)
             // Only use steer PID when going straight
             if (should_use_steer_PID)
             {
-            float target_yaw = is_next_turn_left ? 0.0f : 180.0f;
-            error_steer = target_yaw - yaw;
-            error_integral_steer = error_integral_steer + error_steer * STEER_TIMER_PERIOD_SECONDS;
+                float target_yaw = is_next_turn_left ? 0.0f : 180.0f;
+                error_steer = target_yaw - yaw;
+                error_integral_steer = error_integral_steer + error_steer * STEER_TIMER_PERIOD_SECONDS;
 
-            /* Calculate drive motor input for next time step */
-            error_sum_steer = (int)(error_steer * kp_steer + error_integral_steer * ki_steer);
-            steer_motor_input = STEER_PWM_PULSE_NEUTRAL + error_sum_steer;
+                /* Calculate drive motor input for next time step */
+                error_sum_steer = (int)(error_steer * kp_steer + error_integral_steer * ki_steer);
+                steer_motor_input = STEER_PWM_PULSE_NEUTRAL + error_sum_steer;
 
                 if (steer_motor_input > STEER_PWM_PULSE_MAX_LEFT)
                 {
