@@ -273,8 +273,8 @@ int main(void)
     float error_integral_steer = 0.0f;
     int16_t error_sum_steer = 0;
 
-    float kp_steer = 10.0f;
-    float ki_steer = 0.5f;
+    float kp_steer = 20.0f;
+    float ki_steer = 5.0f;
 
     // Variables for ultrasonic sensor measurements
     float left_distance_cm = 0.0f;
@@ -290,6 +290,11 @@ int main(void)
     bool should_use_steer_PID = true;
     int travel_distance_mag_count = (int)SEARCH_DISTANCE_MAGNET_COUNT;
     int reverse_distance_mag_count = (int)REVERSE_DISTANCE_MAGNET_COUNT;
+
+    // Variables for responding to ultrasonic sensors
+    bool should_turn_right_ultra = false;
+    bool should_turn_left_ultra = false;
+    bool should_stop_ultra = false;
 
     for (;;)
     {
@@ -320,8 +325,13 @@ int main(void)
             drive_motor_input = !should_reverse ? 
                 DRIVE_PWM_PULSE_MIN_FORWARD + error_sum_drive : DRIVE_PWM_PULSE_MIN_REVERSE - error_sum_drive;
 
-            /*Perform Checks on the calculated input */
-            if (!should_reverse)
+            // If something is very close in front of robot stop drive motor completely
+            if (should_stop_ultra)
+            {
+                drive_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
+            }
+            // Perform Checks on the calculated input -> FORWARD
+            else if (!should_reverse)
             {
                 if (drive_motor_input > DRIVE_PWM_PULSE_MAX_FORWARD)
                 {
@@ -332,9 +342,10 @@ int main(void)
                     drive_motor_input = DRIVE_PWM_PULSE_MIN_FORWARD;
                 }
             }
+            // Perform Checks on the calculated input -> REVERSE
+            // Speed settings for reverse are confusing because a smaller drive motor input means faster reverse speed
             else
             {
-                // Speed settings for reverse are confusing because a smaller drive motor input means faster reverse speed
                 if (drive_motor_input > DRIVE_PWM_PULSE_MIN_REVERSE)
                 {
                     drive_motor_input = DRIVE_PWM_PULSE_MIN_REVERSE;
@@ -344,23 +355,6 @@ int main(void)
                     drive_motor_input = DRIVE_PWM_PULSE_MAX_REVERSE;
                 }
             }
-
-            // printf("Left: %5u\n\r", left_magnet_count);
-            // printf("Right: %5u\n\r", right_magnet_count);
-            // printf("Error: %5i\n\r", error_sum);
-            // printf("Motor Input: %5u\n\r", drive_motor_input);
-
-            // MPU6050_getRotation(&GX_meas, &GY_meas, &GZ_meas);
-            // /* 131.07 is just 32768/250 to get us our 1deg/sec value */
-            // GX = ((float)GX_meas - GX_off) / 131.07f;
-            // GY = ((float)GY_meas - GY_off) / 131.07f;
-            // GZ = ((float)GZ_meas - GZ_off) / 131.07f;
-            // /* Rotation Angles in degrees */
-            // pitch = pitch + GX * DRIVE_TIMER_PERIOD_SECONDS;
-            // roll = roll + GY * DRIVE_TIMER_PERIOD_SECONDS;
-            // yaw = yaw + GZ * DRIVE_TIMER_PERIOD_SECONDS;
-
-            // printf("Yaw: %5.2f\n\r", yaw);
 
             /* Reset magnet counts */
             left_magnet_count = 0;
@@ -413,6 +407,7 @@ int main(void)
                 is_currently_turning_first_half = false;
                 should_reverse = true;
                 steer_motor_input = is_next_turn_left ? STEER_PWM_PULSE_MAX_RIGHT : STEER_PWM_PULSE_MAX_LEFT;
+                error_integral_drive = 0.0f;
             }
             // Set variables to stop reversing
             else if (reverse_distance_mag_count <= 0 && should_reverse 
@@ -421,6 +416,7 @@ int main(void)
                 is_currently_turning_second_half = true;
                 should_reverse = false;
                 steer_motor_input = is_next_turn_left ? STEER_PWM_PULSE_MAX_LEFT : STEER_PWM_PULSE_MAX_RIGHT;
+                error_integral_drive = 0.0f;
             }
             /* CHECK CONDITIONS FOR SECOND HALF OF TURN */
             // For turning second 90 degrees left
@@ -450,7 +446,7 @@ int main(void)
             }
 
             // Only use steer PID when going straight
-            if (should_use_steer_PID)
+            if (should_use_steer_PID && !should_turn_left_ultra && !should_stop_ultra && !should_turn_right_ultra)
             {
                 float target_yaw = is_next_turn_left ? 0.0f : 180.0f;
                 error_steer = target_yaw - yaw;
@@ -469,24 +465,22 @@ int main(void)
                     steer_motor_input = STEER_PWM_PULSE_MAX_RIGHT;
                 }
             }
-            // if (left_distance_cm < 40.0)
-            // {
-            //     // printf("Left Distance in: %3.1f cm \r\n", left_distance_cm);
-            //     // Turn right to avoid object
-            //     steer_motor_input = STEER_PWM_PULSE_MAX_RIGHT;
-            // }
-            // else if (center_distance_cm < 40.0)
-            // {
-            //     // printf("Center Distance in: %3.1f cm \r\n", center_distance_cm);
-            //     // Turn to center to reverse
-            //     steer_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
-            // }
-            // else if (right_distance_cm < 40.0)
-            // {
-            //     // printf("Right Distance in: %3.1f cm \r\n", right_distance_cm);
-            //     // Turn left to avoid object
-            //     steer_motor_input = STEER_PWM_PULSE_MAX_LEFT;
-            // }
+
+            // Section for responding to the ultrasonic sensors
+            if (center_distance_cm < 30.0)
+            {
+                steer_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
+                // This flag gets used in the drive motor loop
+                should_stop_ultra = true;
+            }
+            else if (center_distance_cm < 200.0 && (is_next_turn_left && left_distance_cm > 40.0))
+            {
+                steer_motor_input = STEER_PWM_PULSE_MAX_LEFT;
+            }
+            else if (center_distance_cm < 200.0 && (!is_next_turn_left && right_distance_cm > 40.0))
+            {
+                steer_motor_input = STEER_PWM_PULSE_MAX_RIGHT;
+            }
 
             /* Clear the flag */
             steer_timer_flag = false;
