@@ -8,11 +8,7 @@
 /***************************************
  *            Constants
  ****************************************/
-#define CMD_TO_CMD_DELAY (1000UL)
 #define PACKET_SOP_POS (0UL)
-
-/* I2C slave address to communicate with */
-#define I2C_SLAVE_ADDR (0x68)
 
 /* I2C bus frequency */
 #define I2C_FREQ (400000UL)
@@ -43,7 +39,7 @@ void handle_error(void)
 	printf("An Error Occurred With an I2C Function\r\n\n");
 }
 
-void I2C_MPU6050_init()
+void I2C_init()
 {
 	cy_rslt_t result;
 
@@ -73,7 +69,7 @@ void I2C_MPU6050_init()
  *          I2C Read Functions
  ****************************************/
 
-void I2CReadBytes(uint8_t regAddr, uint8_t length, uint8_t *value)
+void I2CReadBytes(uint8_t slaveAddr, uint8_t regAddr, uint8_t length, uint8_t *value)
 {	
 	/* Need to write a register to MPU6050 first 
 		so that it knows what info to send back */
@@ -88,10 +84,10 @@ void I2CReadBytes(uint8_t regAddr, uint8_t length, uint8_t *value)
 	/* Write the our specified register to MPU6050. 
 	Need to make sure send_stop flag is set to 
 	false since we're reading right after */
-	if (CY_RSLT_SUCCESS == cyhal_i2c_master_write(&mI2C, I2C_SLAVE_ADDR, i2c_write_buffer, write_buffer_length, 0, false))
+	if (CY_RSLT_SUCCESS == cyhal_i2c_master_write(&mI2C, slaveAddr, i2c_write_buffer, write_buffer_length, 0, false))
 	{
 		/* Read response packet from the slave. */
-		if (CY_RSLT_SUCCESS == cyhal_i2c_master_read(&mI2C, I2C_SLAVE_ADDR, i2c_read_buffer, read_buffer_length, 0, true))
+		if (CY_RSLT_SUCCESS == cyhal_i2c_master_read(&mI2C, slaveAddr, i2c_read_buffer, read_buffer_length, 0, true))
 		{
 				/* Send data back to calling function */
 				uint8_t i = 0;
@@ -108,22 +104,22 @@ void I2CReadBytes(uint8_t regAddr, uint8_t length, uint8_t *value)
 	}
 }
 
-void I2CReadByte(uint8_t regAddr, uint8_t *value)
+void I2CReadByte(uint8_t slaveAddr, uint8_t regAddr, uint8_t *value)
 {
-	I2CReadBytes(regAddr, 1, value);
+	I2CReadBytes(slaveAddr, regAddr, 1, value);
 }
 
-void I2CReadBits(uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t *value)
+void I2CReadBits(uint8_t slaveAddr, uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t *value)
 {
 	uint8_t mask = ((1 << length) - 1) << (bitStart - length + 1);
-	I2CReadByte(regAddr, value);
+	I2CReadByte(slaveAddr, regAddr, value);
 	*value &= mask;
 	*value >>= (bitStart - length + 1);
 }
 
-void I2CReadBit(uint8_t regAddr, uint8_t bitNum, uint8_t *value)
+void I2CReadBit(uint8_t slaveAddr, uint8_t regAddr, uint8_t bitNum, uint8_t *value)
 {
-	I2CReadByte(regAddr, value);
+	I2CReadByte(slaveAddr, regAddr, value);
 	*value = *value & (1 << bitNum);
 }
 
@@ -131,7 +127,7 @@ void I2CReadBit(uint8_t regAddr, uint8_t bitNum, uint8_t *value)
  *          I2C Write Functions
  ****************************************/
 
-void I2CWriteBytes(uint8_t regAddr, uint8_t length, uint8_t *value)
+void I2CWriteBytes(uint8_t slaveAddr, uint8_t regAddr, uint8_t length, uint8_t *value)
 {
 	uint8_t write_buffer_length = length + 1;
 	uint8_t i2c_write_buffer[write_buffer_length];
@@ -143,33 +139,33 @@ void I2CWriteBytes(uint8_t regAddr, uint8_t length, uint8_t *value)
 		i2c_write_buffer[1 + i] = *value++;
 		i++;
 	}
-	if (cyhal_i2c_master_write(&mI2C, I2C_SLAVE_ADDR, i2c_write_buffer, write_buffer_length, 0, true) != CY_RSLT_SUCCESS)
+	if (cyhal_i2c_master_write(&mI2C, slaveAddr, i2c_write_buffer, write_buffer_length, 0, true) != CY_RSLT_SUCCESS)
 	{
 		printf("Failed at I2CWriteBytes()\r\n\n");
 	}
 }
 
-void I2CWriteByte(uint8_t regAddr, uint8_t value)
+void I2CWriteByte(uint8_t slaveAddr, uint8_t regAddr, uint8_t value)
 {
-	I2CWriteBytes(regAddr, 1, &value);
+	I2CWriteBytes(slaveAddr, regAddr, 1, &value);
 }
 
-void I2CWriteBits(uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t value)
+void I2CWriteBits(uint8_t slaveAddr, uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t value)
 {
 	uint8_t b;
 	uint8_t mask = ((1 << length) - 1) << (bitStart - length + 1);
-	I2CReadByte(regAddr, &b);
+	I2CReadByte(slaveAddr, regAddr, &b);
 	value <<= (bitStart - length + 1);
 	value &= mask;
 	b &= ~(mask);
 	b |= value;
-	I2CWriteByte(regAddr, b);
+	I2CWriteByte(slaveAddr, regAddr, b);
 }
 
-void I2CWriteBit(uint8_t regAddr, uint8_t bitNum, uint8_t value)
+void I2CWriteBit(uint8_t slaveAddr, uint8_t regAddr, uint8_t bitNum, uint8_t value)
 {
 	uint8_t b;
-	I2CReadByte(regAddr, &b);
+	I2CReadByte(slaveAddr, regAddr, &b);
 	b = (value != 0) ? (b | (1 << bitNum)) : (b & ~(1 << bitNum));
-	I2CWriteByte(regAddr, b);
+	I2CWriteByte(slaveAddr, regAddr, b);
 }

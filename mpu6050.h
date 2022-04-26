@@ -401,17 +401,17 @@ THE SOFTWARE.
 uint8_t devAddr;
 uint8_t buffer[22];
 
-extern void I2C_MPU6050_init();
-extern void I2CReadBit(uint8_t regAddr, uint8_t bitNum, uint8_t *value);
-extern void I2CReadBits(uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t *value);
-extern void I2CReadByte(uint8_t regAddr, uint8_t *value);
-extern void I2CReadBytes(uint8_t regAddr, uint8_t length, uint8_t *value);
-extern void I2CWriteBit(uint8_t regAddr, uint8_t bitNum, uint8_t value);
-extern void I2CWriteBits(uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t value);
-extern void I2CWriteByte(uint8_t regAddr, uint8_t value);
-extern void I2CWriteBytes(uint8_t regAddr, uint8_t length, uint8_t *value);
-extern void I2CWriteWord(uint8_t regAddr, uint16_t value);
-extern void I2CWriteWords(uint8_t regAddr, uint8_t length, uint16_t *value);
+extern void I2C_init();
+extern void I2CReadBit(uint8_t slaveAddr, uint8_t regAddr, uint8_t bitNum, uint8_t *value);
+extern void I2CReadBits(uint8_t slaveAddr, uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t *value);
+extern void I2CReadByte(uint8_t slaveAddr, uint8_t regAddr, uint8_t *value);
+extern void I2CReadBytes(uint8_t slaveAddr, uint8_t regAddr, uint8_t length, uint8_t *value);
+extern void I2CWriteBit(uint8_t slaveAddr, uint8_t regAddr, uint8_t bitNum, uint8_t value);
+extern void I2CWriteBits(uint8_t slaveAddr, uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t value);
+extern void I2CWriteByte(uint8_t slaveAddr, uint8_t regAddr, uint8_t value);
+extern void I2CWriteBytes(uint8_t slaveAddr, uint8_t regAddr, uint8_t length, uint8_t *value);
+extern void I2CWriteWord(uint8_t slaveAddr, uint8_t regAddr, uint16_t value);
+extern void I2CWriteWords(uint8_t slaveAddr, uint8_t regAddr, uint8_t length, uint16_t *value);
 
 void MPU6050_address_init();
 void I2C_MPU6050_I2CAddress(uint8_t address);
