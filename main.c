@@ -71,7 +71,7 @@
 #define GYRO_NUM_OF_TESTS (100)
 
 /* Constants for robot taks */
-#define SEARCH_DISTANCE_LENGTH (1.03f) // in [m]
+#define SEARCH_DISTANCE_LENGTH (1.45f) // in [m]
 #define DISTANCE_PER_REV (WHEEL_RADIUS * 6.2832f)
 #define SEARCH_DISTANCE_MAGNET_COUNT (SEARCH_DISTANCE_LENGTH / DISTANCE_PER_REV) * MAGNETS_PER_REV;
 #define REVERSE_DISTANCE_LENGTH (.62f) // in [m]
@@ -467,17 +467,19 @@ int main(void)
             }
 
             // Section for responding to the ultrasonic sensors
-            if (center_distance_cm < 30.0)
+            if ((center_distance_cm < 30.0 || left_distance_cm < 15.0 || right_distance_cm < 15.0) && !should_reverse)
             {
                 steer_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
                 // This flag gets used in the drive motor loop
                 should_stop_ultra = true;
             }
-            else if (center_distance_cm < 200.0 && (is_next_turn_left && left_distance_cm > 40.0))
+            else if ((center_distance_cm < 50.0 || right_distance_cm < 50.0) && (is_next_turn_left && left_distance_cm > 50.0) 
+                    && !is_currently_turning_first_half && !is_currently_turning_second_half && !should_reverse)
             {
                 steer_motor_input = STEER_PWM_PULSE_MAX_LEFT;
             }
-            else if (center_distance_cm < 200.0 && (!is_next_turn_left && right_distance_cm > 40.0))
+            else if ((center_distance_cm < 50.0 || left_distance_cm < 50.0) && (!is_next_turn_left && right_distance_cm > 50.0)
+                    && !is_currently_turning_first_half && !is_currently_turning_second_half && !should_reverse)
             {
                 steer_motor_input = STEER_PWM_PULSE_MAX_RIGHT;
             }
