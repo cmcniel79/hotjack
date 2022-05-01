@@ -85,7 +85,6 @@ static void drive_timer_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void steer_timer_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void left_encoder_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void right_encoder_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event);
-static void calibration_btn_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void ultra_trig_handler(void);
 static void echo_timers_init(void);
 static void left_echo_handler(void *handler_arg, cyhal_gpio_event_t event);
@@ -103,7 +102,6 @@ float target_magnet_count = (TARGET_SPEED / WHEEL_RADIUS) * DRIVE_TIMER_PERIOD_S
 
 /* For Drive Motor */
 bool drive_timer_flag = false;
-bool drive_is_calibrated = false;
 cyhal_timer_t drive_timer;
 uint16_t drive_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
 
@@ -134,6 +132,9 @@ float GX_off, GY_off, GZ_off;      // gyroscope offset values
 float GX, GY, GZ;                  // gyroscope floats
 float pitch, roll, yaw;            // current pitch, roll and yaw angles
 
+/* Variable for storing character read from terminal */
+uint8_t uart_read_value;
+
 /*******************************************************************************
  * Function Name: main
  ********************************************************************************
@@ -158,7 +159,7 @@ int main(void)
     /*******************************************************************************
      * Initialize and calibrate gyroscope
      ********************************************************************************/
-    init_and_calibrate_gyro();
+    // init_and_calibrate_gyro();
 
     /*******************************************************************************
      * Set up Encoder pins and their interrupts
@@ -179,15 +180,6 @@ int main(void)
     cyhal_gpio_enable_event(RIGHT_ENCODER_PIN, CYHAL_GPIO_IRQ_FALL,
                             RIGHT_ENCODER_PRIORITY, true);
 
-    /*******************************************************************************
-     * Set up SW2 button and interrupt for calibrating drive motor
-     ********************************************************************************/
-    cyhal_gpio_init(CYBSP_USER_BTN, CYHAL_GPIO_DIR_INPUT,
-                    CYHAL_GPIO_DRIVE_PULLUP, true);
-    cyhal_gpio_register_callback(CYBSP_USER_BTN,
-                                 calibration_btn_interrupt_handler, NULL);
-    cyhal_gpio_enable_event(CYBSP_USER_BTN, CYHAL_GPIO_IRQ_FALL,
-                            CAL_BUTTON_PRIORITY, true);
 
     /*******************************************************************************
     * Set up Drive Motor PWM
@@ -297,10 +289,41 @@ int main(void)
     // Variables for responding to ultrasonic sensors
     bool should_turn_right_ultra = false;
     bool should_turn_left_ultra = false;
-    bool should_stop_ultra = false;
+
+    // Variables for responding to LabVIEW Commands
+    bool drive_is_calibrated = false;
+
+    // Variable used by ultrasonic sensors and LabVIEW
+    bool should_stop = true;
 
     for (;;)
     {
+        /* Check if 'Enter' key was pressed */
+        if (cyhal_uart_getc(&cy_retarget_io_uart_obj, &uart_read_value, 1) 
+             == CY_RSLT_SUCCESS)
+        {
+        	switch(uart_read_value)
+				{
+        		case 'A':
+        			printf("AReceived the Start Command \r\n");
+                    should_stop = false;
+        			break;
+        		case 'B':
+        			printf("AReceived the Calibrate Command\r\n");
+                    drive_is_calibrated = true;
+        			break;
+        		case 'C':
+        			printf("BReceived the Stop Command Command\r\n");
+                    should_stop = true;
+        			break;
+        		case 'I':
+        		    printf("IPSOC\r\n");
+        		  	break;
+        		default:
+        			break;
+				}
+		}
+
         /* Check the interrupt status */
         if (drive_timer_flag && drive_is_calibrated)
         {
@@ -329,14 +352,15 @@ int main(void)
             drive_motor_input = !should_reverse ? DRIVE_PWM_PULSE_MIN_FORWARD + error_sum_drive : 
                 DRIVE_PWM_PULSE_MIN_REVERSE - error_sum_drive;
 
-            // // If something is very close in front of robot stop drive motor completely
-            // if (should_stop_ultra)
-            // {
-            //     drive_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
-            // }
+            /* If something is very close in front of robot stop drive motor completely,
+                or if the stop button has been pressed */
+            if (should_stop)
+            {
+                drive_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
+            } 
 
             // Perform Checks on the calculated input -> FORWARD
-            if (!should_reverse)
+            else if (!should_reverse)
             {
                 if (drive_motor_input > DRIVE_PWM_PULSE_MAX_FORWARD)
                 {
@@ -376,9 +400,9 @@ int main(void)
             Cy_TCPWM_PWM_SetCompare0(TCPWM0, steer_motor_pwm_NUM, steer_motor_input);
 
             /* Get ultrasonics sensor measurements */
-            left_distance_cm = (SPEED_OF_SOUND_CM_PER_US * left_echo_time * 25);
-            center_distance_cm = (SPEED_OF_SOUND_CM_PER_US * center_echo_time * 25);
-            right_distance_cm = (SPEED_OF_SOUND_CM_PER_US * right_echo_time * 25);
+            // left_distance_cm = (SPEED_OF_SOUND_CM_PER_US * left_echo_time * 25);
+            // center_distance_cm = (SPEED_OF_SOUND_CM_PER_US * center_echo_time * 25);
+            // right_distance_cm = (SPEED_OF_SOUND_CM_PER_US * right_echo_time * 25);
 
             /* Get yaw measurement from gyro */
             MPU6050_getRotation(&GX_meas, &GY_meas, &GZ_meas);
@@ -459,7 +483,7 @@ int main(void)
             }
 
             // Only use steer PID when going straight
-            if (should_use_steer_PID && !should_turn_left_ultra && !should_stop_ultra && !should_turn_right_ultra)
+            if (should_use_steer_PID && !should_turn_left_ultra && !should_stop && !should_turn_right_ultra)
             {
                 float target_yaw = is_next_turn_left ? 0.0f : 180.0f;
                 error_steer = target_yaw - yaw;
@@ -479,23 +503,23 @@ int main(void)
                 }
             }
 
-            // Section for responding to the ultrasonic sensors
-            if ((center_distance_cm < 30.0 || left_distance_cm < 15.0 || right_distance_cm < 15.0) && !should_reverse)
-            {
-                steer_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
-                // This flag gets used in the drive motor loop
-                should_stop_ultra = true;
-            }
-            else if ((center_distance_cm < 50.0 || right_distance_cm < 50.0) && (is_next_turn_left && left_distance_cm > 50.0) 
-                    && !is_currently_turning_first_half && !is_currently_turning_second_half && !should_reverse)
-            {
-                steer_motor_input = STEER_PWM_PULSE_MAX_LEFT;
-            }
-            else if ((center_distance_cm < 50.0 || left_distance_cm < 50.0) && (!is_next_turn_left && right_distance_cm > 50.0)
-                    && !is_currently_turning_first_half && !is_currently_turning_second_half && !should_reverse)
-            {
-                steer_motor_input = STEER_PWM_PULSE_MAX_RIGHT;
-            }
+            // // Section for responding to the ultrasonic sensors
+            // if ((center_distance_cm < 30.0 || left_distance_cm < 15.0 || right_distance_cm < 15.0) && !should_reverse)
+            // {
+            //     steer_motor_input = MOTORS_PWM_WIDTH_NEUTRAL;
+            //     // This flag gets used in the drive motor loop
+            //     should_stop = true;
+            // }
+            // else if ((center_distance_cm < 50.0 || right_distance_cm < 50.0) && (is_next_turn_left && left_distance_cm > 50.0) 
+            //         && !is_currently_turning_first_half && !is_currently_turning_second_half && !should_reverse)
+            // {
+            //     steer_motor_input = STEER_PWM_PULSE_MAX_LEFT;
+            // }
+            // else if ((center_distance_cm < 50.0 || left_distance_cm < 50.0) && (!is_next_turn_left && right_distance_cm > 50.0)
+            //         && !is_currently_turning_first_half && !is_currently_turning_second_half && !should_reverse)
+            // {
+            //     steer_motor_input = STEER_PWM_PULSE_MAX_RIGHT;
+            // }
 
             /* Clear the flag */
             steer_timer_flag = false;
@@ -517,14 +541,6 @@ static void right_encoder_interrupt_handler(void *handler_arg, cyhal_gpio_irq_ev
     (void)handler_arg;
     (void)event;
     right_magnet_count++;
-}
-
-/* Sets calibration flag to true when SW2 button is pressed */
-static void calibration_btn_interrupt_handler(void *handler_arg, cyhal_gpio_irq_event_t event)
-{
-    (void)handler_arg;
-    (void)event;
-    drive_is_calibrated = true;
 }
 
 /* Initialize motor timers */
