@@ -70,12 +70,16 @@
 /* Gyroscope Constants */
 #define GYRO_NUM_OF_TESTS (100)
 
-/* Constants for robot taks */
+/* Constants for robot searching */
 #define SEARCH_DISTANCE_LENGTH (1.45f) // in [m]
 #define DISTANCE_PER_REV (WHEEL_RADIUS * 6.2832f)
 #define SEARCH_DISTANCE_MAGNET_COUNT (SEARCH_DISTANCE_LENGTH / DISTANCE_PER_REV) * MAGNETS_PER_REV;
 #define REVERSE_DISTANCE_LENGTH (.62f) // in [m]
 #define REVERSE_DISTANCE_MAGNET_COUNT (REVERSE_DISTANCE_LENGTH / DISTANCE_PER_REV) * MAGNETS_PER_REV;
+
+/* LabVIEW Communication constants */
+#define LABVIEW_TIMER_PERIOD_SECONDS (0.50f) // Encoder timer period values
+#define LABVIEW_TIMER_PERIOD_HZ (LABVIEW_TIMER_PERIOD_SECONDS * MOTORS_TIMER_CLOCK_HZ)
 
 /*******************************************************************************
  * Function Prototypes
@@ -85,12 +89,15 @@ static void drive_timer_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void steer_timer_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void left_encoder_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void right_encoder_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event);
+static void calibration_btn_interrupt_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void ultra_trig_handler(void);
 static void echo_timers_init(void);
 static void left_echo_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void center_echo_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void right_echo_handler(void *handler_arg, cyhal_gpio_event_t event);
 static void init_and_calibrate_gyro(void);
+static void labview_timer_init(void);
+static void labview_timer_handler(void *handler_arg, cyhal_gpio_event_t event);
 
 /*******************************************************************************
  * Global Variables
@@ -132,9 +139,12 @@ float GX_off, GY_off, GZ_off;      // gyroscope offset values
 float GX, GY, GZ;                  // gyroscope floats
 float pitch, roll, yaw;            // current pitch, roll and yaw angles
 
-/* Variable for storing character read from terminal */
+/* For LabVIEW communications */
 uint8_t uart_read_value;
+cyhal_timer_t labview_timer;
+bool labview_timer_flag = false;
 
+bool drive_is_calibrated = false;
 /*******************************************************************************
  * Function Name: main
  ********************************************************************************
@@ -159,7 +169,7 @@ int main(void)
     /*******************************************************************************
      * Initialize and calibrate gyroscope
      ********************************************************************************/
-    // init_and_calibrate_gyro();
+    init_and_calibrate_gyro();
 
     /*******************************************************************************
      * Set up Encoder pins and their interrupts
@@ -180,6 +190,15 @@ int main(void)
     cyhal_gpio_enable_event(RIGHT_ENCODER_PIN, CYHAL_GPIO_IRQ_FALL,
                             RIGHT_ENCODER_PRIORITY, true);
 
+    /*******************************************************************************
+     * Set up SW2 button and interrupt for calibrating drive motor
+     ********************************************************************************/
+    cyhal_gpio_init(CYBSP_USER_BTN, CYHAL_GPIO_DIR_INPUT,
+                    CYHAL_GPIO_DRIVE_PULLUP, true);
+    cyhal_gpio_register_callback(CYBSP_USER_BTN,
+                                 calibration_btn_interrupt_handler, NULL);
+    cyhal_gpio_enable_event(CYBSP_USER_BTN, CYHAL_GPIO_IRQ_FALL,
+                            CAL_BUTTON_PRIORITY, true);
 
     /*******************************************************************************
     * Set up Drive Motor PWM
@@ -254,6 +273,9 @@ int main(void)
     /* Initialize timer for control loop */
     motor_timers_init();
 
+    /* Initialize timer for labview */
+    labview_timer_init();
+
     // Variables for drive motor controller
     float error_drive = 0.0f;
     float error_integral_drive = 0.0f;
@@ -291,7 +313,7 @@ int main(void)
     bool should_turn_left_ultra = false;
 
     // Variables for responding to LabVIEW Commands
-    bool drive_is_calibrated = false;
+    // bool drive_is_calibrated = false;
 
     // Variable used by ultrasonic sensors and LabVIEW
     bool should_stop = true;
@@ -309,11 +331,11 @@ int main(void)
                     should_stop = false;
         			break;
         		case 'B':
-        			printf("AReceived the Calibrate Command\r\n");
+        			printf("BReceived the Calibrate Command\r\n");
                     drive_is_calibrated = true;
         			break;
         		case 'C':
-        			printf("BReceived the Stop Command Command\r\n");
+        			printf("CReceived the Stop Command Command\r\n");
                     should_stop = true;
         			break;
         		case 'I':
@@ -323,6 +345,11 @@ int main(void)
         			break;
 				}
 		}
+
+        if(labview_timer_flag) {
+            printf("DLabVIEW Flag is true \r\n");
+            labview_timer_flag = false;
+        }
 
         /* Check the interrupt status */
         if (drive_timer_flag && drive_is_calibrated)
@@ -408,6 +435,8 @@ int main(void)
             MPU6050_getRotation(&GX_meas, &GY_meas, &GZ_meas);
             GZ = ((float)GZ_meas - GZ_off) / 131.07f;    // 131.07 is just 32768/250 to get us our 1deg/sec value
             yaw = yaw + GZ * STEER_TIMER_PERIOD_SECONDS; // Rotation Angles in degrees
+
+            printf("Yaw: %f \n\r", yaw);
 
             // Set variables to start turning the first 90 degrees in either direction
             if (travel_distance_mag_count <= 0 && !should_reverse && !is_currently_turning_first_half 
@@ -725,6 +754,47 @@ static void init_and_calibrate_gyro(void)
 
     printf("\n\nTest finished, offset values are shown below: \n\n\r");
     printf("GXoff:%d, GYoff:%d, GZoff:%d\t", (int)GX_off, (int)GY_off, (int)GZ_off);
+}
+
+/* Initialize motor timers */
+static void labview_timer_init(void)
+{
+    // Config for drive motor timer
+    const cyhal_timer_cfg_t labview_timer_cfg =
+        {
+            .compare_value = 0,              /* Timer compare value, not used */
+            .period = LABVIEW_TIMER_PERIOD_HZ, /* Defines the timer period */
+            .direction = CYHAL_TIMER_DIR_UP, /* Timer counts up */
+            .is_compare = false,             /* Don't use compare mode */
+            .is_continuous = true,           /* Run timer indefinitely */
+            .value = 0                       /* Initial value of counter */
+        };
+
+    // Initialize
+    cyhal_timer_init(&labview_timer, NC, NULL);
+    cyhal_timer_configure(&labview_timer, &labview_timer_cfg);
+    cyhal_timer_set_frequency(&labview_timer, MOTORS_TIMER_CLOCK_HZ);
+    cyhal_timer_register_callback(&labview_timer, labview_timer_handler, NULL);
+    cyhal_timer_enable_event(&labview_timer, CYHAL_TIMER_IRQ_TERMINAL_COUNT,
+                             7, true);
+    cyhal_timer_start(&labview_timer);
+}
+
+/* Set labview timer flag to true when timer finishes count */
+static void labview_timer_handler(void *handler_arg, cyhal_gpio_event_t event)
+{
+    (void)handler_arg;
+    (void)event;
+
+    labview_timer_flag = true;
+}
+
+/* Sets calibration flag to true when SW2 button is pressed */
+static void calibration_btn_interrupt_handler(void *handler_arg, cyhal_gpio_irq_event_t event)
+{
+    (void)handler_arg;
+    (void)event;
+    drive_is_calibrated = true;
 }
 
 /* [] END OF FILE */
