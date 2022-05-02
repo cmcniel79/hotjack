@@ -154,6 +154,6 @@ void amg8833_i2c_8x8_read(float *value) {
 		/* Send the float value back to calling function */
 		*value++ = pixel_temp_grid;
 		// Below is for debug
-		printf("Pixel %d Temperature Reading (deg C): %.2f\r\n", n+1, pixel_temp_grid); // prints out the individual pixel temperature readings
+		// printf("Pixel %d Temperature Reading (deg C): %.2f\r\n", n+1, pixel_temp_grid); // prints out the individual pixel temperature readings
 	}
 }
