@@ -78,7 +78,7 @@
 #define REVERSE_DISTANCE_MAGNET_COUNT (REVERSE_DISTANCE_LENGTH / DISTANCE_PER_REV) * MAGNETS_PER_REV;
 
 /* LabVIEW Communication constants */
-#define LABVIEW_TIMER_PERIOD_SECONDS (0.50f) // Encoder timer period values
+#define LABVIEW_TIMER_PERIOD_SECONDS (0.150f) // Encoder timer period values
 #define LABVIEW_TIMER_PERIOD_HZ (LABVIEW_TIMER_PERIOD_SECONDS * MOTORS_TIMER_CLOCK_HZ)
 
 /*******************************************************************************
