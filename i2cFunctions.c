@@ -46,7 +46,7 @@ void I2C_init()
 	/* PSOC Will be I2C Master */
 	cyhal_i2c_cfg_t mI2C_cfg;
 
-	printf(">> Configuring I2C..... ");
+	// printf(">> Configuring I2C..... ");
 	mI2C_cfg.is_slave = false;
 	mI2C_cfg.address = 0;
 	mI2C_cfg.frequencyhal_hz = I2C_FREQ;
@@ -62,7 +62,7 @@ void I2C_init()
 	{
 		handle_error();
 	}
-	printf("Done with I2C Init\r\n");
+	// printf("Done with I2C Init\r\n");
 }
 
 /***************************************

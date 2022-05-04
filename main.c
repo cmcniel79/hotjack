@@ -149,6 +149,7 @@ float ticks_per_measurement_loop;
 
 /* Flag for setting drive motor as calibrated */
 bool drive_is_calibrated = false;
+bool should_stop = true;
 
 /*******************************************************************************
  * Function Name: main
@@ -292,8 +293,8 @@ int main(void)
     int16_t error_sum_drive = 0;
 
     float magnet_avg;
-    float kp_drive = 1.0f;
-    float ki_drive = 0.05f;
+    float kp_drive = 5.0f;
+    float ki_drive = 0.25f;
 
     // Variables for steering motor controller
     float error_steer = 0.0f;
@@ -326,38 +327,38 @@ int main(void)
     // bool drive_is_calibrated = false;
 
     // Variable used by ultrasonic sensors and LabVIEW
-    bool should_stop = false;
+    // bool should_stop = true;
 
     for (;;)
     {
-        // /* Check if 'Enter' key was pressed */
-        // if (cyhal_uart_getc(&cy_retarget_io_uart_obj, &uart_read_value, 1) 
-        //      == CY_RSLT_SUCCESS)
-        // {
-        // 	switch(uart_read_value)
-		// 		{
-        // 		case 'A':
-        // 			printf("AReceived the Start Command \r\n");
-        //             should_stop = false;
-        // 			break;
-        // 		case 'B':
-        // 			printf("BReceived the Calibrate Command\r\n");
-        //             drive_is_calibrated = true;
-        // 			break;
-        // 		case 'C':
-        // 			printf("CReceived the Stop Command Command\r\n");
-        //             should_stop = true;
-        // 			break;
-        // 		case 'I':
-        // 		    printf("IPSOC\r\n");
-        // 		  	break;
-        // 		default:
-        // 			break;
-		// 		}
-		// }
+        /* Check if 'Enter' key was pressed */
+        if (cyhal_uart_getc(&cy_retarget_io_uart_obj, &uart_read_value, 1) 
+             == CY_RSLT_SUCCESS)
+        {
+        	switch(uart_read_value)
+				{
+        		case 'A':
+        			// printf("AReceived the Start Command \r\n");
+                    should_stop = false;
+                    drive_is_calibrated = true;
+        			break;
+        		// case 'B':
+        		// 	printf("BReceived the Calibrate Command\r\n");
+                //     drive_is_calibrated = true;
+        		// 	break;
+        		// case 'C':
+        		// 	printf("CReceived the Stop Command Command\r\n");
+                //     should_stop = true;
+        		// 	break;
+        		// case 'I':
+        		//     printf("IPSOC\r\n");
+        		//   	break;
+        		default:
+        			break;
+				}
+		}
 
-        if(labview_timer_flag) {
-            // printf("DLabVIEW Flag is true \r\n");
+        if(labview_timer_flag && drive_is_calibrated) {
             send_measurements();
             ticks_per_measurement_loop = 0.0f;  // reset the number of encoder ticks to 0
             labview_timer_flag = false;
@@ -432,7 +433,7 @@ int main(void)
             drive_timer_flag = false;
         }
 
-        if (steer_timer_flag)
+        if (steer_timer_flag & drive_is_calibrated)
         {
             /* Apply previously calculated steering motor input */
             Cy_TCPWM_PWM_SetCompare0(TCPWM0, steer_motor_pwm_NUM, steer_motor_input);
@@ -446,6 +447,7 @@ int main(void)
             MPU6050_getRotation(&GX_meas, &GY_meas, &GZ_meas);
             GZ = ((float)GZ_meas - GZ_off) / 131.07f;    // 131.07 is just 32768/250 to get us our 1deg/sec value
             yaw = yaw + GZ * STEER_TIMER_PERIOD_SECONDS; // Rotation Angles in degrees
+            // printf("Yaw: %f \n\r", yaw);
 
             // Set variables to start turning the first 90 degrees in either direction
             if (travel_distance_mag_count <= 0 && !should_reverse && !is_currently_turning_first_half 
@@ -548,12 +550,12 @@ int main(void)
                 // This flag gets used in the drive motor loop
                 should_stop = true;
             }
-            else if ((center_distance_cm < 50.0 || right_distance_cm < 50.0) && (is_next_turn_left && left_distance_cm > 50.0) 
+            else if ((left_distance_cm < 90.0 || center_distance_cm < 90.0 || right_distance_cm < 90.0) && (is_next_turn_left) 
                     && !is_currently_turning_first_half && !is_currently_turning_second_half && !should_reverse)
             {
                 steer_motor_input = STEER_PWM_PULSE_MAX_LEFT;
             }
-            else if ((center_distance_cm < 50.0 || left_distance_cm < 50.0) && (!is_next_turn_left && right_distance_cm > 50.0)
+            else if ((left_distance_cm < 90.0 || center_distance_cm < 90.0 || right_distance_cm < 90.0) && (!is_next_turn_left)
                     && !is_currently_turning_first_half && !is_currently_turning_second_half && !should_reverse)
             {
                 steer_motor_input = STEER_PWM_PULSE_MAX_RIGHT;
@@ -806,6 +808,7 @@ static void calibration_btn_interrupt_handler(void *handler_arg, cyhal_gpio_irq_
     (void)handler_arg;
     (void)event;
     drive_is_calibrated = true;
+    should_stop = false;
 }
 
 /* Sets calibration flag to true when SW2 button is pressed */
