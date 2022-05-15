@@ -118,7 +118,7 @@ void amg8833_i2c_config_registers(void) {
 void amg8833_i2c_8x8_read(float *value) {
 
 	// Performing the combination of lower and upper registers for all 64 pixels and storing them in an array
-	for(uint8_t n = 0; n < 63; n++) {
+	for(uint8_t n = 0; n < 64; n++) {
 		uint8_t pixel_lower_reg = pixel_regs[2 * n]; // updates the address variable for the lower register
 		uint8_t pixel_upper_reg = pixel_regs[2 * n + 1]; // updates the address variable for the upper register
 
