@@ -74,7 +74,7 @@
 #define SEARCH_DISTANCE_LENGTH (1.45f) // in [m]
 #define DISTANCE_PER_REV (WHEEL_RADIUS * 6.2832f)
 #define SEARCH_DISTANCE_MAGNET_COUNT (SEARCH_DISTANCE_LENGTH / DISTANCE_PER_REV) * MAGNETS_PER_REV;
-#define REVERSE_DISTANCE_LENGTH (.62f) // in [m]
+#define REVERSE_DISTANCE_LENGTH (.82f) // in [m]
 #define REVERSE_DISTANCE_MAGNET_COUNT (REVERSE_DISTANCE_LENGTH / DISTANCE_PER_REV) * MAGNETS_PER_REV;
 
 /* LabVIEW Communication constants */
@@ -138,7 +138,9 @@ cy_stc_sysint_t ISR_ultra_trig_config = {
 int16_t GX_meas, GY_meas, GZ_meas; // raw gyroscope values (sensor outputs integers!)
 float GX_off, GY_off, GZ_off;      // gyroscope offset values
 float GX, GY, GZ;                  // gyroscope floats
-float pitch, roll, yaw;            // current pitch, roll and yaw angles
+float pitch = 0;
+float roll = 0;
+float yaw = 0;            // current pitch, roll and yaw angles
 
 /* For LabVIEW communications */
 uint8_t uart_read_value;
@@ -341,6 +343,7 @@ int main(void)
         			// printf("AReceived the Start Command \r\n");
                     should_stop = false;
                     drive_is_calibrated = true;
+                    send_measurements();
         			break;
         		// case 'B':
         		// 	printf("BReceived the Calibrate Command\r\n");
@@ -815,6 +818,7 @@ static void calibration_btn_interrupt_handler(void *handler_arg, cyhal_gpio_irq_
 static void send_measurements(void)
 {              
             float steer_motor_input_float = (float) steer_motor_input;
+            float drive_motor_input_float = (float) drive_motor_input;
             // Printing the pixel temperatures (raw) to serial
             amg8833_i2c_8x8_read(pixels);
 			printf("%.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f ", pixels[0],  pixels[1],  pixels[2],  pixels[3],  pixels[4],  pixels[5],  pixels[6],  pixels[7]);
@@ -828,7 +832,8 @@ static void send_measurements(void)
 
 			printf("%.2f ", yaw); // transmits the yaw value to serial appended after the 64x temperature values
 			printf("%.2f ", ticks_per_measurement_loop); // transmits the encoder data for speed value to serial appended after the 64x temperature values and gyro heading
-			printf("%.2f\r\n\n", steer_motor_input_float); // transmits the current steering motor input to serial appended after the 64x temps, gyro heading, and encoder data
+			printf("%.2f ", steer_motor_input_float); // transmits the current steering motor input to serial appended after the 64x temps, gyro heading, and encoder data
+			printf("%.2f\r\n\n", drive_motor_input_float);
 }
 
 /* [] END OF FILE */
